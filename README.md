@@ -1,4 +1,4 @@
-# Bullpen Reports
+# Reports
 
 Upload TrackMan or TruMedia CSVs, correct mis-tagged pitches, download the
 individual scouting reports and the foldable staff sheet.
