@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import bc_reports
-from bc_reports import hitting, reports, schema
+from bc_reports import hitting, reports, schema, staffstats
 from bc_reports.retags import DROP, METRICS, OPS, RetagBook, Rule
 
 # A partial upload can leave a stale module behind, which otherwise surfaces
@@ -24,6 +24,7 @@ _REQUIRED = {
                                       "load_many"]),
     "bc_reports/hitting.py": (hitting, ["build_hitting_pdf", "fence_radius"]),
     "bc_reports/reports.py": (reports, ["build_staff_pdf", "staff_cuts"]),
+    "bc_reports/staffstats.py": (staffstats, ["load_stats", "attach"]),
 }
 _STALE = [f"{path} (missing {a})" for path, (mod, attrs) in _REQUIRED.items()
           for a in attrs if not hasattr(mod, a)]
@@ -171,6 +172,11 @@ def scouting_page():
         ups = st.file_uploader("TrackMan / TruMedia CSVs", type=["csv"],
                                accept_multiple_files=True, key="scout_up")
         st.caption("Files are combined; duplicate pitch IDs are dropped.")
+        st.header("Season stats")
+        st.caption("Optional. A pitching export with player, IP, ERA, H, K, "
+                   "BB and InZone% adds those to each card.")
+        stat_up = st.file_uploader("Season stats CSV", type=["csv"],
+                                   key="stats_up")
         st.header("Profiles")
         auto = st.checkbox("Re-center cutoffs on this staff", value=True,
                            help="Horizontal separation naturally runs wider "
@@ -207,6 +213,22 @@ def scouting_page():
     if fixed.empty:
         st.error("No usable pitches after corrections.")
         return
+
+    stat_lines, stat_missed, stats_df = {}, [], None
+    if stat_up is not None:
+        try:
+            stats_df = staffstats.load_stats(pd.read_csv(stat_up),
+                                             stat_up.name)
+            found, stat_missed = staffstats.attach(fixed, stats_df)
+            stat_lines = {k: staffstats.format_line(v)
+                          for k, v in found.items()}
+            st.caption(f"Season stats matched for {len(found)} of "
+                       f"{fixed['pitcher'].nunique()} pitchers.")
+            if stat_missed:
+                st.warning("No stats row found for: "
+                           + ", ".join(stat_missed))
+        except schema.SchemaError as e:
+            st.error(str(e))
     cuts = reports.staff_cuts(fixed) if auto else (lo, hi)
     profiles = reports.profiles_for(fixed, cuts)
     for n in notes:
@@ -305,12 +327,16 @@ def scouting_page():
 
     with t3:
         stamp = date.today().isoformat()
-        title = st.text_input("Staff sheet title", "Pitching Staff")
+        team = staffstats.team_label(stats_df, fixed)
+        title = st.text_input(
+            "Staff sheet title",
+            f"{team} Pitching Staff" if team else "Pitching Staff")
         if st.button("Generate PDFs", type="primary"):
             with st.spinner("Building\u2026"):
                 st.session_state["pdfs"] = (
                     reports.build_individual_pdf(fixed, profiles, LOGO),
-                    reports.build_staff_pdf(fixed, profiles, LOGO, title),
+                    reports.build_staff_pdf(fixed, profiles, LOGO, title,
+                                            stat_lines),
                     stamp)
         if "pdfs" in st.session_state:
             ind, staff, stamp = st.session_state["pdfs"]

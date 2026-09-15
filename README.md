@@ -71,9 +71,27 @@ cutoffs on this staff** is on by default and rescales both cutoffs to the
 uploaded group's median — leave it on unless you want fixed thresholds
 across rosters.
 
+## Season stats on the staff sheet
+
+Upload a second CSV in the Scouting sidebar with columns `player`, `IP`,
+`ERA`, `H`, `K`, `BB` and `InZone%` (a TruMedia season pitching export has
+these already). Each card then carries that line under the pitcher's name,
+and the sheet title picks up the team name automatically.
+
+These are official counting stats and are deliberately not derived from the
+pitch data. Strikeouts and walks do reconstruct exactly, but innings and hits
+come up short -- untracked pitches and missing games -- and ERA is not
+derivable at all, because earned versus unearned runs is an official-scorer
+judgement that no pitch-level export carries.
+
+Matching is by surname, with a first initial as tiebreaker, so `Radel`,
+`Radel, Jack`, `Jack Radel` and `J. Radel` all resolve to the same pitcher.
+Anyone without a stats row is named in a warning and still gets a card.
+
 ## Adding a new export format
 
-Column names live in `bc_reports/schema.py`. Add the vendor's spelling to
+TrackMan and TruMedia spellings are both recognised (TruMedia writes `Vel`,
+`Spin`, `IndVertBrk`, `HorzBrk`). Column names live in `bc_reports/schema.py`. Add the vendor's spelling to
 the alias list for whichever canonical field it maps to, and add any new
 pitch names to `PITCH_ALIASES`. A file missing a required column raises a
 message naming the field rather than producing empty plots.
