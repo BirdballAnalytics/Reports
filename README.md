@@ -1,10 +1,14 @@
-# Reports
+# BC Baseball Reports
 
-Upload TrackMan or TruMedia CSVs, correct mis-tagged pitches, download the
-individual scouting reports and the foldable staff sheet.
+Two report types, chosen on entry.
 
-The PDF output is verified pixel-identical to the reports built by hand —
-all 16 pages match exactly.
+**Scouting** — pitcher movement profiles: one page per arm plus the foldable
+staff sheet, with the retag workspace. Output is verified pixel-identical to
+the reports built by hand; all 16 pages match exactly.
+
+**Hitting** — one-page hitter game reports: spray chart, swing decisions,
+contact quality, plate discipline and pitch-group splits. Every printed
+figure is verified against the reference one-pager.
 
 ## Run locally
 
@@ -74,14 +78,54 @@ the alias list for whichever canonical field it maps to, and add any new
 pitch names to `PITCH_ALIASES`. A file missing a required column raises a
 message naming the field rather than producing empty plots.
 
+## Hitting report definitions
+
+- **In zone**: |side| ≤ 0.83 ft, height 1.50–3.50 ft (rulebook).
+- **Heart**: |side| ≤ 0.558 ft, height 1.83–3.17 ft (Statcast attack zone).
+- **Chase%**: swings at pitches outside the rulebook zone, over pitches
+  outside the zone.
+- **Hard hit**: exit velocity ≥ 95 mph. **Sweet spot**: launch angle 8–32°.
+- The shaded box on the contact-quality chart marks 95+ mph at 10–30°. Note
+  this is a different window from the sweet-spot% figure (8–32°, any exit
+  velocity); change `SHADE_LA` / `SWEET_LO` / `SWEET_HI` in `hitting.py` to
+  align them.
+- **GB / LD / FB**: from TaggedHitType when present, otherwise launch-angle
+  bands (under 10°, 10–25°, 25° and up).
+- **Pitch groups**: Fastball covers four-seam, sinker and cutter; Breaking
+  covers slider, curveball and sweeper; Offspeed covers changeup and
+  splitter. Anything unrecognized lands in Other.
+
+### Ballpark
+
+The outfield wall defaults to 330 down the lines, 375 to the gaps and 403 to
+straightaway center; change it in the Hitting sidebar. The wall curve is
+fitted through those three distances with even powers only, so it runs
+smoothly through center rather than forming a point there. Batted balls are
+plotted at true bearing and distance, which means a ball clears the drawn
+wall exactly when it actually cleared it.
+
+Plate appearances are grouped by date, inning, half and PA-of-inning, with
+the last pitch of each carrying the outcome. If those columns are absent the
+app falls back to PitchofPA resets.
+
+### Brand assets
+
+`assets/wordmark.png` is the Eagles script that sits centered in the header.
+`assets/conference.png` is the ACC mark in the footer. Replace either file
+to change the mark; if one is missing the header falls back to the BC logo
+and the footer drops to text only. `assets/Retro_on_Red.png` is the BC logo
+used on the scouting reports.
+
 ## Layout
 
 ```
-app.py                  Streamlit UI
-bc_reports/schema.py    column mapping, pitch-name folding, untracked filter
+app.py                  Streamlit UI and mode routing
+bc_reports/schema.py    column mapping for both pitching and hitting exports
 bc_reports/retags.py    rules engine and persistence
-bc_reports/reports.py   both PDF builders
-assets/                 BC logo
+bc_reports/reports.py   scouting PDFs
+bc_reports/hitting.py   hitting PDFs
+make_fixture.py         rebuilds the reference game for verification
+assets/                 logos
 ```
 
 `reports.py` has no Streamlit dependency — it takes a DataFrame and returns

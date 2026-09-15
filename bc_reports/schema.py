@@ -146,3 +146,87 @@ def load_many(files) -> tuple[pd.DataFrame, pd.DataFrame, list]:
         notes.append(f"Excluded {len(dropped)} untracked or unclassified "
                      f"pitches ({len(tracked)} usable).")
     return tracked, dropped, notes
+
+
+# ------------------------------------------------------------------ hitting
+HIT_CANON = {
+    "batter":      ["Batter", "BatterName", "batter_name", "Hitter", "batter"],
+    "pitch_call":  ["PitchCall", "pitch_call", "PitchResult", "Call"],
+    "plate_x":     ["PlateLocSide", "plate_x", "PlateSide", "px"],
+    "plate_z":     ["PlateLocHeight", "plate_z", "PlateHeight", "pz"],
+}
+HIT_OPTIONAL = {
+    "batter_side":    ["BatterSide", "BatsHand", "batter_side", "Stand"],
+    "pitcher":        ["Pitcher", "PitcherName", "pitcher"],
+    "pitcher_throws": ["PitcherThrows", "PitcherHand", "P_Throws"],
+    "pitch_type":     ["AutoPitchType", "TaggedPitchType", "PitchType",
+                       "pitch_name"],
+    "play_result":    ["PlayResult", "play_result", "Result", "events"],
+    "kor_bb":         ["KorBB", "kor_bb", "KOrBB"],
+    "hit_type":       ["TaggedHitType", "HitType", "bb_type"],
+    "exit_speed":     ["ExitSpeed", "exit_speed", "ExitVelocity", "launch_speed"],
+    "angle":          ["Angle", "LaunchAngle", "launch_angle", "VertHitAngle"],
+    "distance":       ["Distance", "HitDistance", "hit_distance_sc", "Dist"],
+    "bearing":        ["Bearing", "bearing", "HitBearing", "spray_angle"],
+    "inning":         ["Inning", "inning"],
+    "half":           ["Top/Bottom", "TopBottom", "inning_half", "Half"],
+    "pa_of_inning":   ["PAofInning", "pa_of_inning", "PA"],
+    "pitch_of_pa":    ["PitchofPA", "pitch_of_pa", "PitchNumber"],
+    "date":           ["Date", "GameDate", "game_date"],
+    "home_team":      ["HomeTeam", "home_team"],
+    "away_team":      ["AwayTeam", "away_team"],
+    "game_id":        ["GameID", "game_pk", "GameUID"],
+}
+
+
+def normalize_hitting(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
+    lookup = {_key(c): c for c in df.columns}
+    mapping = {}
+    for field, aliases in {**HIT_CANON, **HIT_OPTIONAL}.items():
+        for alias in aliases:
+            if _key(alias) in lookup:
+                mapping[field] = lookup[_key(alias)]
+                break
+    missing = [f for f in HIT_CANON if f not in mapping]
+    if missing:
+        raise SchemaError(
+            f"{source or 'File'}: could not find column(s) for "
+            f"{', '.join(missing)}. This export may not carry hitting data.")
+
+    out = pd.DataFrame()
+    for field, col in mapping.items():
+        out[field] = df[col]
+    for c in ("plate_x", "plate_z", "exit_speed", "angle", "distance",
+              "bearing", "inning", "pa_of_inning", "pitch_of_pa"):
+        if c in out:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    for c in ("batter", "pitcher", "pitch_call", "play_result", "kor_bb",
+              "hit_type", "pitch_type"):
+        if c in out:
+            out[c] = out[c].astype(str).str.strip()
+    for c in ("play_result", "kor_bb", "hit_type"):
+        if c in out:
+            out.loc[out[c].str.lower().isin(["undefined", "nan"]), c] = ""
+    if "date" in out:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce",
+                                     format="mixed")
+    out["source"] = source
+    return out
+
+
+def games_in(df: pd.DataFrame) -> list:
+    """Distinct (label, mask-key) games present, newest first."""
+    if "date" not in df.columns:
+        return [("All pitches", None)]
+    keys = df["date"].dropna().unique()
+    return sorted(keys, reverse=True)
+
+
+def matchup_label(sub: pd.DataFrame) -> str:
+    away = str(sub["away_team"].iloc[0]) if "away_team" in sub else ""
+    home = str(sub["home_team"].iloc[0]) if "home_team" in sub else ""
+    when = ""
+    if "date" in sub and pd.notna(sub["date"].iloc[0]):
+        when = sub["date"].iloc[0].strftime("%B %-d, %Y")
+    vs = f"{away} at {home}" if away and home else ""
+    return " \u2014 ".join([p for p in (vs, when) if p])
