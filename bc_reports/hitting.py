@@ -22,6 +22,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.colors import HexColor, white
 
+from . import feedback
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "..", "assets")
 
@@ -570,7 +572,8 @@ def _draw_footer(c, team, source):
 def build_hitting_pdf(df: pd.DataFrame, batters, matchup: str = "",
                       team: str = "Boston College Baseball",
                       source: str = "Source: TrackMan",
-                      fence: dict | None = None) -> bytes:
+                      fence: dict | None = None,
+                      with_feedback: bool = True) -> bytes:
     """One page per batter, in the order given."""
     if isinstance(batters, str):
         batters = [batters]
@@ -583,6 +586,10 @@ def build_hitting_pdf(df: pd.DataFrame, batters, matchup: str = "",
             _hitting_page(c, df, batter, matchup, team, source, tmp, i,
                           fence)
             c.showPage()
+            if with_feedback:
+                feedback.draw_feedback_page(
+                    c, batter, df[df["batter"] == batter], i, team)
+                c.showPage()
     c.save()
     return buf.getvalue()
 

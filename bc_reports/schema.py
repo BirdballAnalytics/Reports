@@ -178,6 +178,8 @@ HIT_OPTIONAL = {
     "pitch_of_pa":    ["PitchofPA", "pitch_of_pa", "PitchNumber"],
     "date":           ["Date", "GameDate", "game_date"],
     "home_team":      ["HomeTeam", "home_team"],
+    "batter_team":    ["BatterTeam", "batter_team", "battingTeam"],
+    "pitcher_team":   ["PitcherTeam", "pitcher_team", "pitchingTeam"],
     "away_team":      ["AwayTeam", "away_team"],
     "game_id":        ["GameID", "game_pk", "GameUID"],
 }
