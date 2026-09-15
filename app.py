@@ -13,8 +13,20 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import bc_reports
 from bc_reports import hitting, reports, schema
 from bc_reports.retags import DROP, METRICS, OPS, RetagBook, Rule
+
+# A partial upload can leave a stale module behind, which otherwise surfaces
+# as a redacted AttributeError deep in a callback. Fail loudly and early.
+_REQUIRED = {
+    "bc_reports/schema.py": (schema, ["normalize_hitting", "matchup_label",
+                                      "load_many"]),
+    "bc_reports/hitting.py": (hitting, ["build_hitting_pdf", "fence_radius"]),
+    "bc_reports/reports.py": (reports, ["build_staff_pdf", "staff_cuts"]),
+}
+_STALE = [f"{path} (missing {a})" for path, (mod, attrs) in _REQUIRED.items()
+          for a in attrs if not hasattr(mod, a)]
 
 DATA_DIR = os.environ.get("PITCHLAB_DATA", "data")
 BOOK_PATH = os.path.join(DATA_DIR, "retags.json")
@@ -392,6 +404,14 @@ def hitting_page():
 
 
 # ------------------------------------------------------------------- main
+if _STALE:
+    st.error(
+        "Some files on the server are out of date, so the app can't start:\n\n"
+        + "\n".join(f"- {x}" for x in _STALE)
+        + "\n\nRe-upload the whole project to the repo, making sure the "
+          "**bc_reports** folder is included, then let it redeploy.")
+    st.stop()
+
 gate()
 mode = st.session_state.get("mode")
 if mode == "scout":
