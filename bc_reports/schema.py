@@ -13,24 +13,28 @@ import pandas as pd
 CANON = {
     "pitcher":    ["Pitcher", "PitcherName", "pitcher_name", "Player", "pitcher"],
     "throws":     ["PitcherThrows", "PitcherHand", "pitcher_hand", "ThrowHand",
-                   "P_Throws", "pitcherThrows", "Hand"],
+                   "P_Throws", "pitcherThrows", "Hand", "throwsHand"],
     "pitch_type": ["TaggedPitchType", "PitchType", "pitch_type", "AutoPitchType",
-                   "PitchTypeTagged", "pitch_name"],
+                   "PitchTypeTagged", "pitch_name", "pitchTypeFull", "type"],
     "velo":       ["RelSpeed", "ReleaseSpeed", "release_speed", "Velo",
-                   "PitchVelocity", "StartSpeed", "pitch_speed"],
+                   "PitchVelocity", "StartSpeed", "pitch_speed", "Vel",
+                   "releaseVelocity"],
     "spin":       ["SpinRate", "ReleaseSpinRate", "release_spin_rate", "Spin",
                    "spin_rate"],
     "ivb":        ["InducedVertBreak", "InducedVerticalBreak", "IVB",
-                   "induced_vert_break", "pfx_z_induced", "VertBreakInduced"],
+                   "induced_vert_break", "pfx_z_induced", "VertBreakInduced",
+                   "IndVertBrk"],
     "hb":         ["HorzBreak", "HorizontalBreak", "HB", "horz_break",
-                   "pfx_x", "HorzBreakInduced"],
+                   "pfx_x", "HorzBreakInduced", "HorzBrk"],
 }
 
 OPTIONAL = {
-    "uid":     ["PitchUID", "pitch_uid", "PlayID", "pitch_id", "uid"],
-    "date":    ["Date", "GameDate", "game_date", "date"],
-    "pitch_no": ["PitchNo", "pitch_number", "PitchNumber"],
-    "game_id": ["GameID", "game_pk", "GameUID"],
+    "uid":     ["PitchUID", "pitch_uid", "PlayID", "pitch_id", "uid",
+                "uniqPitchId", "playGuid"],
+    "date":    ["Date", "GameDate", "game_date", "date", "gameDate"],
+    "pitch_no": ["PitchNo", "pitch_number", "PitchNumber", "pitchNumInGame"],
+    "game_id": ["GameID", "game_pk", "GameUID", "gameId"],
+    "team":    ["PitcherTeam", "pitchingTeam", "pitcher_team", "Team", "team"],
 }
 
 REQUIRED = list(CANON)

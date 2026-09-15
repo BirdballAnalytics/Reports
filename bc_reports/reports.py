@@ -333,7 +333,9 @@ KEY_H = 24
 SCOLS, SROWS = 2, 8
 ROW_GUT = 4
 NAME_H = 12.0
+STAT_H = 8.6          # season-stat strip, only drawn when stats are supplied
 PLOT_S = 71.0
+PLOT_S_STATS = 61.0   # plot shrinks to make room for that strip
 THEAD_H = 8.0
 TROW_H = 8.0
 
@@ -379,7 +381,8 @@ def _staff_key(c, present):
                       "Movement plots: \u00b125 in., gridlines every 10 in.")
 
 
-def _staff_card(c, x, y, w, h, name, throws, profile, sub, img):
+def _staff_card(c, x, y, w, h, name, throws, profile, sub, img,
+                stat_line="", stat_h=0.0, plot_s=PLOT_S, row_h=TROW_H):
     c.setStrokeColor(RULE)
     c.setLineWidth(0.6)
     c.rect(x, y, w, h, stroke=1, fill=0)
@@ -391,11 +394,23 @@ def _staff_card(c, x, y, w, h, name, throws, profile, sub, img):
     c.drawCentredString(x + w / 2, y + h - NAME_H + 3.8,
                         f"{split_name(name)} - {hand(throws)}")
 
-    body_top = y + h - NAME_H
+    if stat_h:
+        sy = y + h - NAME_H - stat_h
+        c.setFillColor(HexColor("#f0ece2"))
+        c.rect(x, sy, w, stat_h, stroke=0, fill=1)
+        c.setStrokeColor(RULE)
+        c.setLineWidth(0.35)
+        c.line(x, sy, x + w, sy)
+        if stat_line:
+            c.setFillColor(HexColor("#4a4a4a"))
+            c.setFont("Helvetica", 5.9)
+            c.drawCentredString(x + w / 2, sy + 2.6, stat_line)
+
+    body_top = y + h - NAME_H - stat_h
     ir = ImageReader(img)
     iw, ih = ir.getSize()
-    c.drawImage(ir, x + 2, body_top - 1 - PLOT_S, width=PLOT_S * (iw / ih),
-                height=PLOT_S, mask="auto")
+    c.drawImage(ir, x + 2, body_top - 1 - plot_s, width=plot_s * (iw / ih),
+                height=plot_s, mask="auto")
 
     rows = summarize(sub)
     cols = [33, 33, 33, 35, 29.5, 29.5]
@@ -413,21 +428,21 @@ def _staff_card(c, x, y, w, h, name, throws, profile, sub, img):
         cx += cw
     ry = ty - THEAD_H
     for i, r in enumerate(rows):
-        ry -= TROW_H
+        ry -= row_h
         if i % 2 == 1:
             c.setFillColor(TINT)
-            c.rect(tx, ry, tw, TROW_H, stroke=0, fill=1)
+            c.rect(tx, ry, tw, row_h, stroke=0, fill=1)
         c.setFillColor(HexColor(color(r["pt"])))
-        c.circle(tx + 7.5, ry + TROW_H / 2, 2.5, stroke=0, fill=1)
+        c.circle(tx + 7.5, ry + row_h / 2, 2.5, stroke=0, fill=1)
         c.setFillColor(INK)
         c.setFont("Helvetica-Bold", 6.0)
-        c.drawString(tx + 12.5, ry + 2.3, short(r["pt"]))
+        c.drawString(tx + 12.5, ry + (row_h - 6.0) / 2 + 1.3, short(r["pt"]))
         c.setFont("Helvetica", 6.0)
         vals = [f"{r['avg']:.1f}", f"{r['mx']:.1f}", f"{r['spin']:.0f}",
                 f"{r['ivb']:.1f}", f"{r['hb']:.1f}"]
         cx = tx + cols[0]
         for cw, v in zip(cols[1:], vals):
-            c.drawCentredString(cx + cw / 2, ry + 2.3, v)
+            c.drawCentredString(cx + cw / 2, ry + (row_h - 6.0) / 2 + 1.3, v)
             cx += cw
     c.setStrokeColor(RULE)
     c.setLineWidth(0.4)
@@ -461,8 +476,11 @@ def _profile_key_card(c, x, y, w, h):
 
 
 def build_staff_pdf(df, profiles=None, logo=DEFAULT_LOGO,
-                    title="Pitching Staff") -> bytes:
+                    title="Pitching Staff", stats=None) -> bytes:
     profiles = profiles or profiles_for(df)
+    stats = stats or {}
+    stat_h = STAT_H if stats else 0.0
+    plot_s = PLOT_S_STATS if stats else PLOT_S
     pitchers = sorted(df["pitcher"].unique())
     per_page = SCOLS * SROWS
     buf = io.BytesIO()
@@ -471,6 +489,10 @@ def build_staff_pdf(df, profiles=None, logo=DEFAULT_LOGO,
     cw = (SPW - 2 * SMARGIN - FOLD_GUT) / SCOLS
     grid_top = SPH - SHEADER_H - KEY_H - 2
     ch = (grid_top - SMARGIN - (SROWS - 1) * ROW_GUT) / SROWS
+
+    # keep the tallest arsenal inside its card; uniform across the sheet
+    widest = max((df.groupby("pitcher")["pitch_type"].nunique().max(), 1))
+    row_h = min(TROW_H, (ch - NAME_H - stat_h - THEAD_H) / widest)
 
     with tempfile.TemporaryDirectory() as tmp:
         pages = [pitchers[i:i + per_page]
@@ -487,7 +509,8 @@ def build_staff_pdf(df, profiles=None, logo=DEFAULT_LOGO,
                 img = os.path.join(tmp, f"{pg}_{i}.png")
                 _mini_plot(sub, img)
                 _staff_card(c, x, y, cw, ch, name, sub["throws"].iloc[0],
-                            profiles.get(name, "Stock"), sub, img)
+                            profiles.get(name, "Stock"), sub, img,
+                            stats.get(name, ""), stat_h, plot_s, row_h)
             if len(chunk) < per_page:
                 col, r = divmod(len(chunk), SROWS)
                 if col < SCOLS:
