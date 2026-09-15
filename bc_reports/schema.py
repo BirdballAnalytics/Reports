@@ -210,6 +210,11 @@ def normalize_hitting(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
     if "date" in out:
         out["date"] = pd.to_datetime(out["date"], errors="coerce",
                                      format="mixed")
+        # single-game exports often have a few blank Date cells; filling them
+        # keeps those pitches from vanishing when filtering by game
+        days = out["date"].dropna().dt.normalize().unique()
+        if len(days) == 1:
+            out["date"] = out["date"].fillna(pd.Timestamp(days[0]))
     out["source"] = source
     return out
 
@@ -222,11 +227,18 @@ def games_in(df: pd.DataFrame) -> list:
     return sorted(keys, reverse=True)
 
 
+def _first(sub: pd.DataFrame, col: str):
+    """First populated value in a column, or None. Row zero is not safe --
+    exports routinely carry blank cells at the top of a file."""
+    if col not in sub.columns:
+        return None
+    vals = sub[col].dropna()
+    return vals.iloc[0] if len(vals) else None
+
+
 def matchup_label(sub: pd.DataFrame) -> str:
-    away = str(sub["away_team"].iloc[0]) if "away_team" in sub else ""
-    home = str(sub["home_team"].iloc[0]) if "home_team" in sub else ""
-    when = ""
-    if "date" in sub and pd.notna(sub["date"].iloc[0]):
-        when = sub["date"].iloc[0].strftime("%B %-d, %Y")
+    away, home = _first(sub, "away_team"), _first(sub, "home_team")
+    when = _first(sub, "date")
     vs = f"{away} at {home}" if away and home else ""
-    return " \u2014 ".join([p for p in (vs, when) if p])
+    day = when.strftime("%B %-d, %Y") if when is not None else ""
+    return " \u2014 ".join([p for p in (vs, day) if p])
