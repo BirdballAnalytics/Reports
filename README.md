@@ -113,6 +113,15 @@ message naming the field rather than producing empty plots.
   covers slider, curveball and sweeper; Offspeed covers changeup and
   splitter. Anything unrecognized lands in Other.
 
+### Feedback form
+
+Each hitter's report is followed by a Post Series Hitter Feedback page with
+real fillable PDF fields, so it can be completed in any PDF reader rather
+than printed. Player, date and opponent arrive pre-filled and stay editable;
+opponent is taken from the team whose pitchers the hitter actually faced, so
+it is right even when one export contains both clubs. Turn the page off with
+the checkbox in the Hitting sidebar.
+
 ### Ballpark
 
 The outfield wall defaults to 330 down the lines, 375 to the gaps and 403 to

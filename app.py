@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import bc_reports
-from bc_reports import hitting, reports, schema, staffstats
+from bc_reports import feedback, hitting, reports, schema, staffstats
 from bc_reports.retags import DROP, METRICS, OPS, RetagBook, Rule
 
 # A partial upload can leave a stale module behind, which otherwise surfaces
@@ -25,6 +25,7 @@ _REQUIRED = {
     "bc_reports/hitting.py": (hitting, ["build_hitting_pdf", "fence_radius"]),
     "bc_reports/reports.py": (reports, ["build_staff_pdf", "staff_cuts"]),
     "bc_reports/staffstats.py": (staffstats, ["load_stats", "attach"]),
+    "bc_reports/feedback.py": (feedback, ["draw_feedback_page"]),
 }
 _STALE = [f"{path} (missing {a})" for path, (mod, attrs) in _REQUIRED.items()
           for a in attrs if not hasattr(mod, a)]
@@ -366,6 +367,11 @@ def hitting_page():
             "gap": f2.number_input("Gaps", value=375, step=1),
             "center": f3.number_input("Center", value=403, step=1),
         }
+        st.header("Feedback form")
+        with_fb = st.checkbox("Include post-series feedback page", value=True,
+                              help="Adds a fillable form behind each hitter's "
+                                   "report, pre-filled with player, date and "
+                                   "opponent.")
         st.header("Footer")
         team = st.text_input("Left", "Boston College Baseball")
         srcs = st.text_input("Right", "Source: TrackMan")
@@ -420,7 +426,7 @@ def hitting_page():
     if st.button("Generate report", type="primary"):
         with st.spinner("Building\u2026"):
             st.session_state["hit_pdf"] = hitting.build_hitting_pdf(
-                d, picked, matchup, team, srcs, fence)
+                d, picked, matchup, team, srcs, fence, with_fb)
     if "hit_pdf" in st.session_state:
         stamp = game if game != "All games" else date.today().isoformat()
         st.download_button("Download hitting report",
