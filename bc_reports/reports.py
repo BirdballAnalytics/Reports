@@ -45,6 +45,11 @@ PROFILE = {"Stock": ("#c8102e", white),
            "North/South": ("#005daa", white),
            "East/West": ("#ffc72c", INK)}
 DEFAULT_CUTS = (0.75, 1.10)
+
+# Handedness note lines on the individual reports, matching the profile
+# swatch red and blue so the sheet keeps one palette
+RHH_RED = HexColor("#c8102e")
+LHH_BLUE = HexColor("#005daa")
 MIN_REPS = 3
 
 
@@ -272,20 +277,19 @@ def _ind_notes(c, rows, top, bottom):
     c.setStrokeColor(MAROON)
     c.setLineWidth(1.1)
     c.line(IMARGIN, top - 15, IPW - IMARGIN, top - 15)
-    labels = [display(r["pt"]) for r in rows] + ["Overall"]
-    cols = [color(r["pt"]) for r in rows] + [None]
-    step = min(30.0, ((top - 24) - bottom) / len(labels))
+    # (label, dot colour or None, text colour)
+    lines = [(display(r["pt"]), color(r["pt"]), INK) for r in rows]
+    lines += [("RHH:", None, RHH_RED), ("LHH:", None, LHH_BLUE)]
+
+    step = min(30.0, ((top - 24) - bottom) / len(lines))
     y = top - 24
-    for lab, col in zip(labels, cols):
+    for lab, dot, txt in lines:
         y -= step
-        if col:
-            c.setFillColor(HexColor(col))
+        if dot:
+            c.setFillColor(HexColor(dot))
             c.circle(IMARGIN + 5, y + 3.4, 4.2, stroke=0, fill=1)
-            c.setFillColor(INK)
-            c.setFont("Helvetica-Bold", 8.4)
-        else:
-            c.setFillColor(ISOFT)
-            c.setFont("Helvetica-Oblique", 8.4)
+        c.setFillColor(txt)
+        c.setFont("Helvetica-Bold", 8.4)
         c.drawString(IMARGIN + 15, y + 1, lab)
         c.setStrokeColor(IRULE)
         c.setLineWidth(0.5)
@@ -306,7 +310,7 @@ def build_individual_pdf(df, profiles=None, logo=DEFAULT_LOGO) -> bytes:
                         profiles.get(name, "Stock"), logo)
             rows = summarize(sub)
             table_h = 21 + len(rows) * 17.5
-            notes_h = 24 + (len(rows) + 1) * 18.5
+            notes_h = 24 + (len(rows) + 2) * 18.5
             body_top = IPH - IHEADER_H
             plot_h = body_top - IMARGIN - table_h - notes_h - 40
             plot_h = max(238, min(312, plot_h))
