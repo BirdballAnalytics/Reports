@@ -23,7 +23,8 @@ _REQUIRED = {
     "bc_reports/schema.py": (schema, ["normalize_hitting", "matchup_label",
                                       "load_many"]),
     "bc_reports/hitting.py": (hitting, ["build_hitting_pdf", "fence_radius"]),
-    "bc_reports/reports.py": (reports, ["build_staff_pdf", "staff_cuts"]),
+    "bc_reports/reports.py": (reports, ["build_staff_pdf", "staff_cuts",
+                                        "RHH_RED", "LHH_BLUE"]),
     "bc_reports/staffstats.py": (staffstats, ["load_stats", "attach"]),
     "bc_reports/feedback.py": (feedback, ["draw_feedback_page"]),
 }
@@ -133,6 +134,9 @@ def mode_switch():
             for k in ("mode", "pdfs", "hit_pdf"):
                 st.session_state.pop(k, None)
             st.rerun()
+        # Which build is actually live. If this does not match what you just
+        # deployed, the upload did not land.
+        st.caption(f"v{bc_reports.__version__}")
         st.divider()
 
 
