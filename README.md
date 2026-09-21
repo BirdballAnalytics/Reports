@@ -2,9 +2,14 @@
 
 Two report types, chosen on entry.
 
-**Scouting** — pitcher movement profiles: one page per arm plus the foldable
-staff sheet, with the retag workspace. Output is verified pixel-identical to
-the reports built by hand; all 16 pages match exactly.
+**Scouting** — a full sheet per arm (season line, movement plot, metrics with
+VAA/EXT/RelH/InZone%, batter-hand splits, usage by situation, and an eight-panel
+location grid) plus a staff sheet that folds once down the middle, ordered from
+most innings to fewest. Includes the retag workspace.
+
+Both need two files: the pitch-level export and a season pitching export.
+Without the second one the sheets still build, but the season lines are blank
+and the staff sheet cannot be ordered by innings.
 
 **Hitting** — one-page hitter game reports: spray chart, swing decisions,
 contact quality, plate discipline and pitch-group splits. Every printed
@@ -70,6 +75,24 @@ vertical, so a neutral arsenal sits *below* 1.0, not at it. **Re-center
 cutoffs on this staff** is on by default and rescales both cutoffs to the
 uploaded group's median — leave it on unless you want fixed thresholds
 across rosters.
+
+## Views and conventions
+
+Location panels are drawn in **catcher's view** — a right-handed hitter stands
+on the left of each panel. TruMedia ships `x` the other way round (its
+hit-by-pitches put righties at +x, and a righty stands third-base side, which
+the catcher sees on his left), so `panels.py` negates it. `CATCHER_VIEW` at the
+top of that file flips both the data and the home plate together, so the two
+can never disagree.
+
+Heat maps use a single-hue ramp rather than the usual blue-to-red: density is a
+magnitude and has no meaningful midpoint.
+
+RISP is reconstructed, not exported. No TruMedia column carries baserunners, so
+`advanced.add_risp` walks each half-inning and applies the advancement notation
+in the play description. On the reference season it produced a 27.2% RISP rate
+against a typical 22-26%, with one contradiction in 229 scoring plays. It cannot
+see steals or wild pitches, so treat it as close rather than exact.
 
 ## Season stats on the staff sheet
 

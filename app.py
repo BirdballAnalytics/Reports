@@ -14,7 +14,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import bc_reports
-from bc_reports import feedback, hitting, reports, schema, staffstats
+from bc_reports import (advanced, feedback, hitting, reports, schema,
+                        scout, staffstats)
 from bc_reports.retags import DROP, METRICS, OPS, RetagBook, Rule
 
 # A partial upload can leave a stale module behind, which otherwise surfaces
@@ -27,6 +28,9 @@ _REQUIRED = {
                                         "RHH_RED", "LHH_BLUE"]),
     "bc_reports/staffstats.py": (staffstats, ["load_stats", "attach"]),
     "bc_reports/feedback.py": (feedback, ["draw_feedback_page"]),
+    "bc_reports/advanced.py": (advanced, ["add_risp", "hand_splits", "usage"]),
+    "bc_reports/scout.py": (scout, ["build_individual_1page",
+                                    "build_staff_expanded", "ip_value"]),
 }
 _STALE = [f"{path} (missing {a})" for path, (mod, attrs) in _REQUIRED.items()
           for a in attrs if not hasattr(mod, a)]
@@ -178,8 +182,11 @@ def scouting_page():
                                accept_multiple_files=True, key="scout_up")
         st.caption("Files are combined; duplicate pitch IDs are dropped.")
         st.header("Season stats")
-        st.caption("Optional. A pitching export with player, IP, ERA, H, K, "
-                   "BB and InZone% adds those to each card.")
+        st.caption("A season pitching export (player, IP, ERA, H, K, BB, "
+                   "InZone%, and G/GS/2B/3B/HR/K%/BB%/FIP/WHIP for the "
+                   "individual sheets). Without it the sheets still build, "
+                   "but the season lines are blank and the staff sheet "
+                   "cannot be ordered by innings.")
         stat_up = st.file_uploader("Season stats CSV", type=["csv"],
                                    key="stats_up")
         st.header("Profiles")
@@ -218,13 +225,17 @@ def scouting_page():
     if fixed.empty:
         st.error("No usable pitches after corrections.")
         return
+    # pitch groups, in-zone flag, two-strike flag, and the reconstructed
+    # runners-in-scoring-position flag the usage tables need
+    fixed = advanced.add_risp(advanced.prepare(fixed))
 
-    stat_lines, stat_missed, stats_df = {}, [], None
+    stat_lines, stat_missed, stats_df, season = {}, [], None, {}
     if stat_up is not None:
         try:
             stats_df = staffstats.load_stats(pd.read_csv(stat_up),
                                              stat_up.name)
             found, stat_missed = staffstats.attach(fixed, stats_df)
+            season = found
             stat_lines = {k: staffstats.format_line(v)
                           for k, v in found.items()}
             st.caption(f"Season stats matched for {len(found)} of "
@@ -336,12 +347,18 @@ def scouting_page():
         title = st.text_input(
             "Staff sheet title",
             f"{team} Pitching Staff" if team else "Pitching Staff")
+        layout = st.radio(
+            "Individual sheet layout", ["One page", "Two pages"],
+            horizontal=True,
+            help="One page fits everything on a single sheet. Two pages "
+                 "gives the heat maps a full page of their own.")
         if st.button("Generate PDFs", type="primary"):
             with st.spinner("Building\u2026"):
+                build = (scout.build_individual_1page if layout == "One page"
+                         else scout.build_individual_2page)
                 st.session_state["pdfs"] = (
-                    reports.build_individual_pdf(fixed, profiles, LOGO),
-                    reports.build_staff_pdf(fixed, profiles, LOGO, title,
-                                            stat_lines),
+                    build(fixed, season, LOGO),
+                    scout.build_staff_expanded(fixed, season, LOGO, title),
                     stamp)
         if "pdfs" in st.session_state:
             ind, staff, stamp = st.session_state["pdfs"]
