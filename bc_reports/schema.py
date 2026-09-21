@@ -35,6 +35,25 @@ OPTIONAL = {
     "pitch_no": ["PitchNo", "pitch_number", "PitchNumber", "pitchNumInGame"],
     "game_id": ["GameID", "game_pk", "GameUID", "gameId"],
     "team":    ["PitcherTeam", "pitchingTeam", "pitcher_team", "Team", "team"],
+    # --- advanced scouting: locations, shape detail and plate-appearance
+    # context. All optional, so an export lacking them still loads.
+    "plate_x":   ["PlateLocSide", "plate_x", "PlateSide", "px", "x"],
+    "plate_z":   ["PlateLocHeight", "plate_z", "PlateHeight", "pz", "y"],
+    "vaa":       ["VertApprAngle", "VAA", "vert_appr_angle",
+                  "VerticalApproachAngle"],
+    "ext":       ["Extension", "ext", "release_extension"],
+    "rel_h":     ["RelHeight", "ReleaseHeight", "rel_height", "z0"],
+    "rel_s":     ["RelSide", "ReleaseSide", "rel_side", "x0"],
+    "bat_hand":  ["BatterSide", "batterHand", "BatsHand", "Stand",
+                  "batter_hand"],
+    "count":     ["count", "Count", "balls_strikes"],
+    "play_result": ["PlayResult", "pitchResult", "play_result", "events"],
+    "play_desc": ["atbatDesc", "play_desc", "des", "description"],
+    "inning":    ["Inning", "inn", "inning"],
+    "half":      ["Top/Bottom", "TopBottom", "inning_half", "Half"],
+    "ab_num":    ["abNumInGame", "PAofInning", "ab_num", "at_bat_number"],
+    "exit_velo": ["ExitSpeed", "ExitVel", "exit_speed", "exitVelocity",
+                  "launch_speed"],
 }
 
 REQUIRED = list(CANON)
@@ -67,7 +86,13 @@ JUNK_TAGS = {"undefined", "knuckleball", "other", "unknown", "", "nan"}
 
 
 def _key(s: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(s).lower())
+    """Normalise a column name for matching.
+
+    A percent sign is kept as 'pct' rather than stripped: season exports
+    carry both `K` and `K%`, which would otherwise collide on the same key
+    and let the rate silently overwrite the count.
+    """
+    return re.sub(r"[^a-z0-9]", "", str(s).lower().replace("%", "pct"))
 
 
 class SchemaError(ValueError):
@@ -101,8 +126,23 @@ def normalize(df: pd.DataFrame, mapping: dict | None = None,
     for field, col in mapping.items():
         out[field] = df[col]
 
-    for c in ("velo", "spin", "ivb", "hb"):
-        out[c] = pd.to_numeric(out[c], errors="coerce")
+    for c in ("velo", "spin", "ivb", "hb", "plate_x", "plate_z", "vaa",
+              "ext", "rel_h", "rel_s", "exit_velo", "ab_num"):
+        if c in out:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    # `inning` is only ever a grouping key, and TruMedia writes it as
+    # "Bot 1" / "Top 3". Coercing it to a number would silently blank it.
+    if "inning" in out:
+        out["inning"] = out["inning"].astype(str).str.strip()
+
+    if "bat_hand" in out:
+        out["bat_hand"] = (out["bat_hand"].astype(str).str.strip()
+                           .str[:1].str.upper()
+                           .where(lambda s: s.isin(["R", "L"])))
+    for c in ("play_result", "play_desc", "count", "half"):
+        if c in out:
+            out[c] = out[c].astype(str).str.strip()
+            out.loc[out[c].str.lower().isin(["nan", "undefined", ""]), c] = None
 
     out["pitcher"] = out["pitcher"].astype(str).str.strip()
     out["throws"] = (out["throws"].astype(str).str.strip().str.lower()

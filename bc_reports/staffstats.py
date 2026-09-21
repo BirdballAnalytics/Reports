@@ -21,6 +21,18 @@ STAT_CANON = {
     "bb":    ["BB", "Walks", "walks", "BBA"],
     "zone":  ["InZone%", "Zone%", "InZonePct", "zone_pct", "InZone"],
 }
+# Present in fuller season exports; absent from leaner ones, so optional.
+STAT_EXTRA = {
+    "g":      ["G", "Games", "App"],
+    "gs":     ["GS", "GamesStarted", "Starts"],
+    "b2":     ["2B", "Doubles"],
+    "b3":     ["3B", "Triples"],
+    "hr":     ["HR", "HomeRuns", "HomeRunsAllowed"],
+    "k_pct":  ["K%", "KPct", "StrikeoutPct"],
+    "bb_pct": ["BB%", "BBPct", "WalkPct"],
+    "fip":    ["FIP", "fip"],
+    "whip":   ["WHIP", "whip"],
+}
 STAT_OPTIONAL = {
     "first":     ["playerFirstName", "firstName", "first_name", "First"],
     "full":      ["playerFullName", "fullName", "Name", "full_name"],
@@ -34,6 +46,12 @@ STAT_OPTIONAL = {
 # Fields shown on the staff sheet, in order
 FIELDS = [("ip", "IP"), ("era", "ERA"), ("h", "H"),
           ("k", "K"), ("bb", "BB"), ("zone", "Zone")]
+
+# The fuller line on the individual sheets
+FULL_FIELDS = [("g", "G"), ("gs", "GS"), ("ip", "IP"), ("era", "ERA"),
+               ("h", "H"), ("b2", "2B"), ("b3", "3B"), ("hr", "HR"),
+               ("k_pct", "K%"), ("bb_pct", "BB%"), ("fip", "FIP"),
+               ("whip", "WHIP")]
 
 
 def name_key(value) -> str:
@@ -67,7 +85,8 @@ def first_initial(value) -> str:
 def load_stats(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
     lookup = {_key(c): c for c in df.columns}
     mapping = {}
-    for field, aliases in {**STAT_CANON, **STAT_OPTIONAL}.items():
+    for field, aliases in {**STAT_CANON, **STAT_OPTIONAL,
+                           **STAT_EXTRA}.items():
         for a in aliases:
             if _key(a) in lookup:
                 mapping[field] = lookup[_key(a)]
@@ -80,8 +99,9 @@ def load_stats(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
             f"player, IP, ERA, H, K, BB and InZone%.")
 
     out = pd.DataFrame({k: df[v] for k, v in mapping.items()})
-    if "pos" in out:                      # drop position players who threw
-        out = out[out["pos"].astype(str).str.upper().str.contains("P")]
+    # No position filter. Two-way players are listed at their primary spot --
+    # a catcher with 36 innings pitched is still a pitcher on this sheet --
+    # and attach() only ever looks up names that threw pitches anyway.
     out["_key"] = out["last"].map(name_key)
     out["_init"] = (out["first"].astype(str).str[:1].str.lower()
                     if "first" in out else "")
@@ -123,7 +143,8 @@ def attach(pitches: pd.DataFrame, stats: pd.DataFrame | None):
             missed.append(name)
             continue
         r = cands[0]
-        found[name] = {k: r.get(k) for k, _ in FIELDS}
+        keys = {k for k, _ in FIELDS} | {k for k, _ in FULL_FIELDS}
+        found[name] = {k: r.get(k) for k in keys}
     return found, missed
 
 
