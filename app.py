@@ -14,8 +14,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import bc_reports
-from bc_reports import (advanced, feedback, hitting, reports, schema,
-                        scout, staffstats)
+from bc_reports import (advanced, derived, feedback, hitting, reports,
+                        schema, scout, staffstats)
 from bc_reports.retags import DROP, METRICS, OPS, RetagBook, Rule
 
 # A partial upload can leave a stale module behind, which otherwise surfaces
@@ -31,6 +31,7 @@ _REQUIRED = {
     "bc_reports/advanced.py": (advanced, ["add_risp", "hand_splits", "usage"]),
     "bc_reports/scout.py": (scout, ["build_individual_1page",
                                     "build_staff_expanded", "ip_value"]),
+    "bc_reports/derived.py": (derived, ["season_from_pitches", "coverage"]),
 }
 _STALE = [f"{path} (missing {a})" for path, (mod, attrs) in _REQUIRED.items()
           for a in attrs if not hasattr(mod, a)]
@@ -249,9 +250,11 @@ def scouting_page():
         st.header("Season stats")
         st.caption("A season pitching export (player, IP, ERA, H, K, BB, "
                    "InZone%, and G/GS/2B/3B/HR/K%/BB%/FIP/WHIP for the "
-                   "individual sheets). Without it the sheets still build, "
-                   "but the season lines are blank and the staff sheet "
-                   "cannot be ordered by innings.")
+                   "individual sheets). Optional \u2014 without it the whole "
+                   "line is rebuilt from the pitch data instead. Upload it "
+                   "when you want the official book: derived innings, "
+                   "strikeouts and walks come out on the nose, but ERA "
+                   "cannot tell an earned run from an unearned one.")
         stat_up = st.file_uploader("Season stats CSV", type=["csv"],
                                    key="stats_up")
         st.header("Profiles")
@@ -310,6 +313,17 @@ def scouting_page():
                            + ", ".join(stat_missed))
         except schema.SchemaError as e:
             st.error(str(e))
+    else:
+        # No official export, so rebuild the line from the pitch data.
+        # Outcomes are counted over every row, including pitches the unit
+        # failed to measure: a walk is a walk whether or not the radar
+        # caught the ball, and dropping those would cost real innings.
+        outcomes = advanced.prepare(pd.concat([tracked, dropped],
+                                              ignore_index=True))
+        season = derived.season_from_pitches(outcomes)
+        stat_lines = {k: staffstats.format_line(v) for k, v in season.items()}
+        if season:
+            st.caption(derived.coverage(outcomes))
     cuts = reports.staff_cuts(fixed) if auto else (lo, hi)
     profiles = reports.profiles_for(fixed, cuts)
     for n in notes:
