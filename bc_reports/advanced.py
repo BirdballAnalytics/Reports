@@ -16,7 +16,11 @@ import re
 import numpy as np
 import pandas as pd
 
-ZONE_X, ZONE_Y = 1.175, 1.125
+# The zone geometry lives with the coordinate handling, in schema.py, so the
+# box drawn on the panels and the box used to rescale a feet-based export can
+# never drift apart. Re-exported here because panels.py and the sheets have
+# always imported it from this module.
+from .schema import ZONE_X, ZONE_Y  # noqa: F401
 
 # The four groups the staff scouts by. Cutter stands alone rather than
 # folding into the fastballs.
@@ -40,10 +44,10 @@ HEAT_TITLE = {"FB": "FASTBALL", "BB": "BREAKING BALL", "CH": "CHANGEUP",
               "CUT": "CUTTER"}
 
 HARD_HIT = 95.0
-# Panels are only blanked when there is essentially nothing to draw. A
-# handful of pitches smoothed into a cloud would read as a tendency the
-# pitcher does not have; anything above this shows as it is.
-MIN_HEATMAP = 5
+# No minimum: every pitch a man threw shows up, down to a single one. A map
+# built from one or two pitches is a couple of dots rather than a tendency,
+# which is exactly what it should look like.
+MIN_HEATMAP = 1
 
 ON_BASE = re.compile(r"^(Single|Walk|Intentional Walk|Hit By Pitch|"
                      r"Reached on Error|Fielder)")
@@ -99,9 +103,14 @@ def add_risp(df: pd.DataFrame) -> pd.DataFrame:
     without ending a plate appearance, so treat it as close rather than
     exact.
     """
+    from . import derived
+
     d = df.copy()
     d["risp"] = False
-    if "play_desc" not in d.columns or "inning" not in d.columns:
+    if "inning" not in d.columns:
+        return d
+    vocab = derived.vocabulary(d)
+    if vocab == "trumedia" and "play_desc" not in d.columns:
         return d
 
     keys = [k for k in ("game_id", "date", "inning", "half") if k in d.columns]
@@ -113,24 +122,49 @@ def add_risp(df: pd.DataFrame) -> pd.DataFrame:
     risp = pd.Series(False, index=d.index)
     for _, half in d.groupby(keys, sort=False, dropna=False):
         bases = {1: False, 2: False, 3: False}
-        pa_key = "ab_num" if "ab_num" in half.columns else "play_desc"
+        pa_key = ("ab_num" if "ab_num" in half.columns
+                  else ("play_desc" if vocab == "trumedia" else "pitch_of_pa"))
         for _, pa in half.groupby(pa_key, sort=False, dropna=False):
             risp.loc[pa.index] = bases[2] or bases[3]
             # Only the pitch that ENDED the plate appearance carries the
-            # description and the outcome. Every other pitch in the PA has a
-            # per-pitch result ("Ball", "Foul"), so read the terminal row.
-            ends = pa[pa["play_desc"].notna()]
+            # outcome. Every other pitch in the PA has a per-pitch result
+            # ("Ball", "Foul"), so read the terminal row.
+            ends = derived.pa_ends(pa, vocab)
             if ends.empty:
                 continue
             last = ends.iloc[-1]
-            desc = str(last["play_desc"])
-            for frm, to in ADVANCE.findall(desc):
-                if frm != "B" and bases.get(int(frm)):
-                    bases[int(frm)] = False
-                if to != "H":
-                    bases[int(to)] = True
-            if _bases_reached(last["play_result"]) in (1, 2, 3):
-                bases[_bases_reached(last["play_result"])] = True
+            desc = str(last.get("play_desc") or "")
+            if desc and desc.lower() != "nan":
+                # TruMedia spells out where every runner went.
+                for frm, to in ADVANCE.findall(desc):
+                    if frm != "B" and bases.get(int(frm)):
+                        bases[int(frm)] = False
+                    if to != "H":
+                        bases[int(to)] = True
+                if _bases_reached(last["play_result"]) in (1, 2, 3):
+                    bases[_bases_reached(last["play_result"])] = True
+                continue
+            # TrackMan gives the outcome but not the baserunning, so runners
+            # are moved on the standard assumption: everyone advances by as
+            # many bases as the batter took, and a walk pushes only forced
+            # runners. It misses steals and extra bases taken, so treat
+            # TrackMan RISP as close rather than exact.
+            kind = derived.classify(last, vocab)[0]
+            adv = {"1B": 1, "2B": 2, "3B": 3, "HR": 4, "ERR": 1}.get(kind, 0)
+            if kind in ("BB", "HBP"):
+                if bases[1] and bases[2] and not bases[3]:
+                    bases[3] = True
+                if bases[1] and not bases[2]:
+                    bases[2] = True
+                bases[1] = True
+            elif adv:
+                nb = {1: False, 2: False, 3: False}
+                for b in (3, 2, 1):
+                    if bases[b] and b + adv <= 3:
+                        nb[b + adv] = True
+                if adv <= 3:
+                    nb[adv] = True
+                bases = nb
     d["risp"] = risp
     return d
 
@@ -139,28 +173,37 @@ def add_risp(df: pd.DataFrame) -> pd.DataFrame:
 def hand_splits(df: pd.DataFrame) -> pd.DataFrame:
     """AVG / OBP / OPS and counting stats against each batter hand.
 
-    One row per plate appearance, taken from the pitch that ended it."""
-    if "play_desc" not in df.columns:
-        return pd.DataFrame()
-    pa = df[df["play_desc"].notna()]
+    One row per plate appearance, taken from the pitch that ended it. Which
+    pitch that is, and what the outcome was, is read through the shared
+    classifier so a TrackMan export -- which splits the result across KorBB,
+    PitchCall and PlayResult -- produces the same table as a TruMedia one.
+    """
+    from . import derived
+
+    vocab = derived.vocabulary(df)
+    pa = derived.pa_ends(df, vocab)
     if pa.empty:
         return pd.DataFrame()
+    kinds = pd.Series([derived.classify(r, vocab)[0] for _, r in pa.iterrows()],
+                      index=pa.index)
+    sacs = pa["play_result"].fillna("").astype(str).str.startswith("Sac")
 
     rows = []
     for hand in ("R", "L", "ALL"):
-        g = pa if hand == "ALL" else pa[pa["bat_hand"] == hand]
+        mask = slice(None) if hand == "ALL" else (pa["bat_hand"] == hand)
+        g = pa if hand == "ALL" else pa[mask]
         if g.empty:
             continue
-        res = g["play_result"].fillna("").astype(str)
-        single = res.str.startswith("Single").sum()
-        dbl = res.str.startswith("Double on").sum()
-        tpl = res.str.startswith("Triple").sum()
-        hr = res.str.contains("Home Run").sum()
+        k_g = kinds if hand == "ALL" else kinds[mask]
+        single = int((k_g == "1B").sum())
+        dbl = int((k_g == "2B").sum())
+        tpl = int((k_g == "3B").sum())
+        hr = int((k_g == "HR").sum())
         hits = single + dbl + tpl + hr
-        bb = res.str.fullmatch(r"(Intentional )?Walk").sum()
-        hbp = res.str.startswith("Hit By Pitch").sum()
-        k = res.str.startswith("Strikeout").sum()
-        sac = res.str.startswith("Sac").sum()
+        bb = int((k_g == "BB").sum())
+        hbp = int((k_g == "HBP").sum())
+        k = int((k_g == "K").sum())
+        sac = int((sacs if hand == "ALL" else sacs[mask]).sum())
         pa_n = len(g)
         ab = pa_n - bb - hbp - sac
         tb = single + 2 * dbl + 3 * tpl + 4 * hr

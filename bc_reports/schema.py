@@ -47,6 +47,10 @@ OPTIONAL = {
     "bat_hand":  ["BatterSide", "batterHand", "BatsHand", "Stand",
                   "batter_hand"],
     "count":     ["count", "Count", "balls_strikes"],
+    # TrackMan keeps the two halves of the count in separate columns; they
+    # are folded into `count` below so the two-strike slice works either way.
+    "balls":     ["Balls"],
+    "strikes":   ["Strikes"],
     "play_result": ["PlayResult", "pitchResult", "play_result", "events"],
     "play_desc": ["atbatDesc", "play_desc", "des", "description"],
     "inning":    ["Inning", "inn", "inning"],
@@ -54,7 +58,67 @@ OPTIONAL = {
     "ab_num":    ["abNumInGame", "PAofInning", "ab_num", "at_bat_number"],
     "exit_velo": ["ExitSpeed", "ExitVel", "exit_speed", "exitVelocity",
                   "launch_speed"],
+    # --- outcome detail, used to derive season stats when no stats export is
+    # uploaded. TrackMan splits the plate-appearance result across three
+    # columns (KorBB carries strikeouts and walks, PlayResult the batted
+    # ball, PitchCall the hit-by-pitch); TruMedia puts all of it in one.
+    "k_or_bb":      ["KorBB", "k_or_bb"],
+    "pitch_call":   ["PitchCall", "pitchOutcome", "pitch_call"],
+    "outs_on_play": ["OutsOnPlay", "outs_on_play"],
+    # Outs BEFORE the pitch. Differencing it across a half-inning recovers
+    # every out, including the ones no plate appearance records -- caught
+    # stealing, pickoffs, runners thrown out.
+    "outs_before":  ["Outs", "outs"],
+    "runs_scored":  ["RunsScored", "runs_scored"],
+    "pitch_of_pa":  ["PitchofPA", "pitchNumInAB", "pitch_of_pa"],
 }
+
+# --- plate-location units -------------------------------------------------
+# The strike zone, in the normalised space everything downstream works in.
+# Fitted against the InZone% TruMedia publishes in its season export, which it
+# reproduces to within 0.2 percentage points.
+ZONE_X, ZONE_Y = 1.175, 1.125
+
+# TrackMan and Statcast instead report feet: side from the middle of the
+# plate, height from the ground. Half the plate is 8.5in and a ball's radius
+# is 1.45in, so a pitch catching the black sits 9.95in off centre; the rule
+# zone runs 1.5ft to 3.5ft off the ground.
+PLATE_HALF_FT = 9.95 / 12.0
+ZONE_BOT_FT, ZONE_TOP_FT = 1.5, 3.5
+ZONE_MID_FT = (ZONE_TOP_FT + ZONE_BOT_FT) / 2
+ZONE_HALF_FT = (ZONE_TOP_FT - ZONE_BOT_FT) / 2
+
+
+def plate_units(plate_z: pd.Series) -> str:
+    """'feet' or 'zone' -- which coordinate system a file's locations use.
+
+    Decided from the height column rather than the column name, so an export
+    from a vendor we have not seen still lands in the right branch. A height
+    measured from the ground clusters around two and a half feet; one
+    normalised to the zone is centred on zero, and its median cannot plausibly
+    sit a full zone-height above the middle of the zone.
+    """
+    z = pd.to_numeric(plate_z, errors="coerce").dropna()
+    if z.empty:
+        return "zone"
+    return "feet" if z.median() > 1.0 else "zone"
+
+
+def to_zone_space(out: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+    """Convert feet-from-the-ground locations into the normalised space.
+
+    Returns the frame and whether a conversion happened, so the caller can
+    say so. Sign conventions already agree: in both vendors' exports a
+    right-handed hitter stands at positive x (verified from hit-by-pitch
+    locations), and the catcher's-view flip is applied once, at draw time.
+    """
+    if "plate_z" not in out or "plate_x" not in out:
+        return out, False
+    if plate_units(out["plate_z"]) != "feet":
+        return out, False
+    out["plate_x"] = out["plate_x"] / PLATE_HALF_FT * ZONE_X
+    out["plate_z"] = (out["plate_z"] - ZONE_MID_FT) / ZONE_HALF_FT * ZONE_Y
+    return out, True
 
 REQUIRED = list(CANON)
 
@@ -127,9 +191,21 @@ def normalize(df: pd.DataFrame, mapping: dict | None = None,
         out[field] = df[col]
 
     for c in ("velo", "spin", "ivb", "hb", "plate_x", "plate_z", "vaa",
-              "ext", "rel_h", "rel_s", "exit_velo", "ab_num"):
+              "ext", "rel_h", "rel_s", "exit_velo", "ab_num",
+              "outs_on_play", "runs_scored", "pitch_of_pa", "outs_before"):
         if c in out:
             out[c] = pd.to_numeric(out[c], errors="coerce")
+    if "count" not in out and {"balls", "strikes"} <= set(out.columns):
+        b = pd.to_numeric(out["balls"], errors="coerce")
+        s = pd.to_numeric(out["strikes"], errors="coerce")
+        out["count"] = (b.astype("Int64").astype(str) + "-"
+                        + s.astype("Int64").astype(str))
+        out.loc[b.isna() | s.isna(), "count"] = None
+
+    # Locations arrive in feet from some vendors and normalised to the zone
+    # from others. One space from here on.
+    out, converted = to_zone_space(out)
+    out.attrs["plate_converted"] = converted
     # `inning` is only ever a grouping key, and TruMedia writes it as
     # "Bot 1" / "Top 3". Coercing it to a number would silently blank it.
     if "inning" in out:
@@ -139,7 +215,8 @@ def normalize(df: pd.DataFrame, mapping: dict | None = None,
         out["bat_hand"] = (out["bat_hand"].astype(str).str.strip()
                            .str[:1].str.upper()
                            .where(lambda s: s.isin(["R", "L"])))
-    for c in ("play_result", "play_desc", "count", "half"):
+    for c in ("play_result", "play_desc", "count", "half", "k_or_bb",
+              "pitch_call"):
         if c in out:
             out[c] = out[c].astype(str).str.strip()
             out.loc[out[c].str.lower().isin(["nan", "undefined", ""]), c] = None
@@ -175,8 +252,12 @@ def load_many(files) -> tuple[pd.DataFrame, pd.DataFrame, list]:
     frames, notes = [], []
     for name, fh in files:
         raw = pd.read_csv(fh, low_memory=False)
-        frames.append(normalize(raw, source=name))
-        notes.append(f"{name}: {len(raw)} rows")
+        one = normalize(raw, source=name)
+        frames.append(one)
+        note = f"{name}: {len(raw)} rows"
+        if one.attrs.get("plate_converted"):
+            note += " (locations in feet, rescaled to the strike zone)"
+        notes.append(note)
     if not frames:
         raise SchemaError("No files supplied.")
     combined = pd.concat(frames, ignore_index=True)
