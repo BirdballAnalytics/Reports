@@ -25,6 +25,8 @@ from .reports import (DEFAULT_LOGO, GOLD, INK, IRULE, ISOFT, LHH_BLUE, MAROON,
 PW, PH = letter
 MARGIN = 34
 HEADER_H = 74
+# Height the RHH / LHH notes block needs: heading and rule, then two lines.
+NOTES_H = 62.0
 
 
 # ------------------------------------------------------------------ blocks
@@ -214,13 +216,26 @@ def _usage_legend(c, x, y, text=None, size=6.0):
         x += size + 4 + c.stringWidth(lab, "Helvetica", size) + 12
 
 
-def _heat_grid(c, sub, tmp, tag, x, top, w, cols=4, gap=7.0):
+def _heat_grid(c, sub, tmp, tag, x, top, w, cols=4, gap=7.0, bottom=None):
     """Four groups across, one row per batter hand, spanning the full width.
 
     The grid is always four by two: a group the pitcher does not throw draws
-    as an empty zone rather than being skipped, so every sheet reads alike."""
+    as an empty zone rather than being skipped, so every sheet reads alike.
+
+    Pass `bottom` and the panels size themselves to the room that is left.
+    The block above this one grows with the number of pitches a man throws --
+    six write-in lines take more room than two -- and it is far better for
+    the maps to give up a few points than for the page to run off the end.
+    """
     picked = advanced.heat_panels(sub)
     cell = (w - (cols - 1) * gap) / cols
+    if bottom is not None:
+        # Each of the two rows carries a 12pt hand label above and 9pt of air
+        # below its panels, and a panel is within a percent of square once
+        # the group title is counted.
+        fit = (top - bottom) / 2.0 - 21.0
+        cell = max(48.0, min(cell, fit))
+        gap = (w - cols * cell) / (cols - 1)
     y = top
     for hnd in ("R", "L"):
         row = [(g, s2) for g, h, s2 in picked if h == hnd]
@@ -240,6 +255,38 @@ def _heat_grid(c, sub, tmp, tag, x, top, w, cols=4, gap=7.0):
             c.drawImage(ir, cx, y - h, width=cell, height=h, mask="auto")
             cx += cell + gap
         y -= low + 9
+    return y
+
+
+def _pitch_notes(c, rows, x, top, w):
+    """A write-in line for each pitch this man actually throws.
+
+    Sits directly under the metrics table so the note is read next to the
+    numbers it describes. Only his own pitch types appear -- a sheet for a
+    two-pitch reliever gets two lines, not six empty ones.
+
+    The step tightens for a six-pitch arsenal: those are rare, and the few
+    points saved are what keep the block from pushing the heat maps off the
+    bottom of the page.
+    """
+    if not rows:
+        return top
+    step = 13.0 if len(rows) <= 5 else 11.5
+    c.setFillColor(MAROON)
+    c.setFont("Helvetica-Bold", 7.0)
+    c.drawString(x, top - 7.5, "NOTES BY PITCH")
+    y = top - 11.0
+    for r in rows:
+        y -= step
+        c.setFillColor(HexColor(color(r["pt"])))
+        c.circle(x + 3.4, y + 2.4, 2.6, stroke=0, fill=1)
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 7.2)
+        lab = display(r["pt"])
+        c.drawString(x + 9.5, y + 0.8, lab)
+        c.setStrokeColor(IRULE)
+        c.setLineWidth(0.5)
+        c.line(x + 62, y, x + w, y)
     return y
 
 
@@ -302,8 +349,11 @@ def build_individual_1page(df, stats=None, logo=DEFAULT_LOGO,
             pw = _movement(c, sub, tmp, f"{i}", MARGIN, y, plot_h)
             tx = MARGIN + pw + 12
             tw = PW - MARGIN - tx
-            _metrics_table(c, mets, tx, y, tw)
-            y -= plot_h + 12
+            tbl_bot = _metrics_table(c, mets, tx, y, tw)
+            notes_bot = _pitch_notes(c, mets, tx, tbl_bot - 6, tw)
+            # The right-hand column can run past the plot when a man throws
+            # five or six pitches, so the row takes whichever is taller.
+            y -= max(plot_h, y - notes_bot + 4) + 12
 
             # splits left, usage right
             ux = PW / 2 + 10
@@ -324,8 +374,9 @@ def build_individual_1page(df, stats=None, logo=DEFAULT_LOGO,
 
             _section(c, "LOCATION", MARGIN, y)
             y -= 6
+            # Room kept back for the notes block: its rule, then two lines.
             y = _heat_grid(c, sub, tmp, f"{i}", MARGIN, y,
-                           PW - 2 * MARGIN)
+                           PW - 2 * MARGIN, bottom=MARGIN + NOTES_H)
 
             _notes(c, MARGIN, y - 4, MARGIN, PW - 2 * MARGIN)
             c.showPage()
@@ -355,8 +406,10 @@ def build_individual_2page(df, stats=None, logo=DEFAULT_LOGO,
             plot_h = 232.0
             pw = _movement(c, sub, tmp, f"{i}", MARGIN, y, plot_h)
             tx = MARGIN + pw + 16
-            _metrics_table(c, mets, tx, y, PW - MARGIN - tx)
-            y -= plot_h + 18
+            tw = PW - MARGIN - tx
+            tbl_bot = _metrics_table(c, mets, tx, y, tw)
+            notes_bot = _pitch_notes(c, mets, tx, tbl_bot - 10, tw)
+            y -= max(plot_h, y - notes_bot + 4) + 18
 
             _section(c, "SPLITS", MARGIN, y)
             y -= 8
