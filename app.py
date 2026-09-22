@@ -172,6 +172,71 @@ def movement_fig(sub: pd.DataFrame, selected: set) -> go.Figure:
     return fig
 
 
+def roster_order(df: pd.DataFrame, season: dict) -> list:
+    """Pitchers in the order the staff sheet prints them: innings, then name."""
+    return sorted(df["pitcher"].dropna().unique(),
+                  key=lambda n: (-scout.ip_value((season.get(n) or {}).get("ip")),
+                                 n))
+
+
+def roster_label(df: pd.DataFrame, season: dict):
+    """'Radel - RHP  (87.2 IP, 412 pitches)' for the picker."""
+    def fmt(name):
+        g = df[df["pitcher"] == name]
+        hand = reports.hand(g["throws"].iloc[0]) if len(g) else ""
+        head = reports.split_name(name) + (f" - {hand}" if hand else "")
+        ip = (season.get(name) or {}).get("ip")
+        ip_txt = "" if ip is None or str(ip).strip().lower() in ("", "nan") \
+            else f"{str(ip).strip()} IP, "
+        return f"{head}  ({ip_txt}{len(g)} pitches)"
+    return fmt
+
+
+def roster_picker(df: pd.DataFrame, season: dict) -> list:
+    """Choose which pitchers land on the PDFs.
+
+    Everyone in the uploaded files is offered. The selection is reconciled on
+    every run so that a pitcher who appears in a newly added file is included
+    by default rather than silently left off, while names that are no longer
+    in the data drop away.
+    """
+    everyone = roster_order(df, season)
+    seen = st.session_state.get("_roster_seen")
+    if seen is None:
+        st.session_state["roster"] = list(everyone)
+    else:
+        keep = set(st.session_state.get("roster", []))
+        keep |= {n for n in everyone if n not in seen}     # new arrivals in
+        st.session_state["roster"] = [n for n in everyone if n in keep]
+    st.session_state["_roster_seen"] = list(everyone)
+
+    st.subheader("Pitchers on the reports")
+    c1, c2, _ = st.columns([1, 1, 5])
+    # Both buttons sit above the widget on purpose: Streamlit forbids writing
+    # to a widget's key once that widget has been drawn this run.
+    if c1.button("Select all", use_container_width=True):
+        st.session_state["roster"] = list(everyone)
+        st.rerun()
+    if c2.button("Clear", use_container_width=True):
+        st.session_state["roster"] = []
+        st.rerun()
+    chosen = st.multiselect(
+        "Include", everyone, key="roster",
+        format_func=roster_label(df, season),
+        help="Everyone found in the uploaded files is listed, most innings "
+             "first. Remove an arm here and he is left off both the "
+             "individual sheets and the staff sheet. Profile cutoffs still "
+             "come from the whole upload, so a pitcher's Stock / North-South "
+             "/ East-West label does not shift with who else you print.")
+    if chosen:
+        pages = -(-len(chosen) // (scout.SCOLS * scout.SROWS))
+        st.caption(f"{len(chosen)} of {len(everyone)} pitchers — "
+                   f"{len(chosen)} individual page"
+                   f"{'s' if len(chosen) != 1 else ''}, staff sheet on "
+                   f"{pages} page{'s' if pages != 1 else ''}.")
+    return chosen
+
+
 def scouting_page():
     bar("Scouting", "Pitcher movement reports")
     book = load_book()
@@ -343,6 +408,8 @@ def scouting_page():
 
     with t3:
         stamp = date.today().isoformat()
+        chosen = roster_picker(fixed, season)
+        st.divider()
         team = staffstats.team_label(stats_df, fixed)
         title = st.text_input(
             "Staff sheet title",
@@ -352,13 +419,19 @@ def scouting_page():
             horizontal=True,
             help="One page fits everything on a single sheet. Two pages "
                  "gives the heat maps a full page of their own.")
-        if st.button("Generate PDFs", type="primary"):
+        if not chosen:
+            st.info("Pick at least one pitcher to build the reports.")
+        elif st.button("Generate PDFs", type="primary"):
             with st.spinner("Building\u2026"):
+                # Only the chosen arms reach the builders. Cutoffs and
+                # profiles were fixed above from the full upload, so they
+                # stay put whoever is printed.
+                sel = fixed[fixed["pitcher"].isin(chosen)]
                 build = (scout.build_individual_1page if layout == "One page"
                          else scout.build_individual_2page)
                 st.session_state["pdfs"] = (
-                    build(fixed, season, LOGO),
-                    scout.build_staff_expanded(fixed, season, LOGO, title),
+                    build(sel, season, LOGO),
+                    scout.build_staff_expanded(sel, season, LOGO, title),
                     stamp)
         if "pdfs" in st.session_state:
             ind, staff, stamp = st.session_state["pdfs"]
