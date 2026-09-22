@@ -397,6 +397,9 @@ SHEAD, SFOOT = 40.0, 15.0
 SCOLS, SROWS = 2, 10
 # Gutter wide enough that the centre crease clears both cards by 4mm.
 SGX, SGY = 24.0, 4.0
+# Breathing room under the maroon header band, so the first row of cards
+# does not butt up against it.
+SGAP = 10.0
 
 
 def ip_value(ip) -> float:
@@ -413,10 +416,17 @@ def ip_value(ip) -> float:
         return 0.0
 
 
-def _card_rows(mets, cap=4, floor=0.02):
-    """Drop trace pitch types, then cap, so a one-off doesn't eat a row."""
+def _card_rows(mets, cap=6, floor=0.0):
+    """Every pitch type he throws, most-used first, then back into order.
+
+    This used to drop anything under five pitches or 2% of the arsenal and
+    cap the card at four rows, which quietly cost real pitches -- a starter's
+    85 curveballs among them. The card has room for six, which covers every
+    arsenal seen so far, so nothing is dropped unless a man throws more than
+    that, and then it is the least-used that goes.
+    """
     total = sum(r["n"] for r in mets) or 1
-    keep = [r for r in mets if r["n"] >= max(5, floor * total)]
+    keep = [r for r in mets if r["n"] >= floor * total] if floor else list(mets)
     keep = sorted(keep, key=lambda r: -r["n"])[:cap]
     return sorted(keep, key=lambda r: pitch_rank(r["pt"]))
 
@@ -426,7 +436,12 @@ def _abbr(pt):
     return ABBR.get(pt, str(pt)[:2].upper())
 
 
-def _staff_metrics(c, rows, x, top, w, rh=4.8, fs=4.3):
+def _staff_metrics(c, rows, x, top, w, rh=None, fs=4.3):
+    # A six-pitch arsenal is rare and the card has just enough height for it
+    # at a slightly tighter row. Compressing the row on those few cards is
+    # invisible; running the usage block off the bottom would not be.
+    if rh is None:
+        rh = 4.8 if len(rows) <= 5 else 4.2
     heads = ["PITCH", "AVG", "MAX", "SPIN", "IVB", "HB", "VAA", "EXT",
              "RELH", "ZN"]
     wts = [1.85, 1.00, 1.00, 1.08, 0.86, 0.86, 0.86, 0.80, 0.88, 0.82]
@@ -544,7 +559,8 @@ def _staff_card(c, x, y, w, h, name, sub, stat, tmp, tag):
     gap = 4.0
     tbl_bot = _staff_metrics(c, _card_rows(advanced.metrics_table(sub)),
                              x + 2, top, left_w)
-    _usage_block(c, advanced.usage(sub), x + 2, tbl_bot - 2.0, left_w)
+    use_bot = _usage_block(c, advanced.usage(sub), x + 2, tbl_bot - 2.0,
+                           left_w)
 
     # movement plot and the two damage maps, right of the tables
     rx = x + 2 + left_w + gap
@@ -576,6 +592,9 @@ def _staff_card(c, x, y, w, h, name, sub, stat, tmp, tag):
         c.drawImage(ir, rx + (pw - wd) / 2, p_top - ht, width=wd, height=ht,
                     mask="auto")
         rx += pw + pgap
+    # How much room was left under the lowest thing on the card. Negative
+    # means the tables ran past the bottom edge; the tests watch this.
+    return use_bot - y
 
 
 def _profile_key(c, x, y):
@@ -602,13 +621,14 @@ def build_staff_expanded(df, stats=None, logo=DEFAULT_LOGO,
                    key=lambda n: (-ip_value(stats.get(n, {}).get("ip")), n))
     per = SCOLS * SROWS
     cw = (SPW - 2 * SM - (SCOLS - 1) * SGX) / SCOLS
-    grid_top = SPH - SHEAD
+    grid_top = SPH - SHEAD - SGAP
     ch = (grid_top - SM - SFOOT - (SROWS - 1) * SGY) / SROWS
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=letter)
     c.setTitle(title)
     with tempfile.TemporaryDirectory() as tmp:
+        overflow = []
         pages = [names[i:i + per] for i in range(0, len(names), per)] or [[]]
         for pg, chunk in enumerate(pages):
             c.setFillColor(MAROON)
@@ -634,8 +654,11 @@ def build_staff_expanded(df, stats=None, logo=DEFAULT_LOGO,
                 r, col = divmod(i, SCOLS)
                 x = SM + col * (cw + SGX)
                 yy = grid_top - (r + 1) * ch - r * SGY
-                _staff_card(c, x, yy, cw, ch, nm, df[df["pitcher"] == nm],
-                            stats.get(nm, {}), tmp, f"{pg}_{i}")
+                slack = _staff_card(c, x, yy, cw, ch, nm,
+                                    df[df["pitcher"] == nm],
+                                    stats.get(nm, {}), tmp, f"{pg}_{i}")
+                if slack is not None and slack < 0:
+                    overflow.append((nm, round(slack, 2)))
 
             # the single crease, sitting in the gutter
             c.setStrokeColor(HexColor("#cfcfcf"))
