@@ -255,8 +255,11 @@ def scouting_page():
                    "line is rebuilt from the pitch data instead. Upload it "
                    "when you want the official book: derived innings, "
                    "strikeouts and walks come out on the nose, but ERA "
-                   "cannot tell an earned run from an unearned one.")
+                   "cannot tell an earned run from an unearned one. "
+                   "Several files are fine \u2014 the per-pitcher split "
+                   "exports come one at a time, so upload the whole stack.")
         stat_up = st.file_uploader("Season stats CSV", type=["csv"],
+                                   accept_multiple_files=True,
                                    key="stats_up")
         st.header("Profiles")
         auto = st.checkbox("Re-center cutoffs on this staff", value=True,
@@ -299,10 +302,12 @@ def scouting_page():
     fixed = advanced.add_risp(advanced.prepare(fixed))
 
     stat_lines, stat_missed, stats_df, season = {}, [], None, {}
-    if stat_up is not None:
+    if stat_up:
         try:
-            stats_df = staffstats.load_stats(pd.read_csv(stat_up),
-                                             stat_up.name)
+            stats_df, stat_notes = staffstats.load_many_stats(
+                [(f.name, f) for f in stat_up])
+            for n in stat_notes:
+                st.caption(n)
             found, stat_missed = staffstats.attach(fixed, stats_df)
             season = found
             stat_lines = {k: staffstats.format_line(v)
