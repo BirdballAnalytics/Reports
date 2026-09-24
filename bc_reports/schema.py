@@ -35,6 +35,15 @@ OPTIONAL = {
     "pitch_no": ["PitchNo", "pitch_number", "PitchNumber", "pitchNumInGame"],
     "game_id": ["GameID", "game_pk", "GameUID", "gameId"],
     "team":    ["PitcherTeam", "pitchingTeam", "pitcher_team", "Team", "team"],
+    # TruMedia's `pitcher` column is the bare surname and its `fullName`
+    # column is the TEAM, not the player. The nearest thing to a full name in
+    # the pitch export is the abbreviated form, "J. Radel". A real first name
+    # only arrives with the season stats export.
+    "pitcher_full": ["pitcherAbbrevName", "PitcherFullName",
+                     "pitcher_full_name"],
+    # Both vendors number their players, and a split stats export identifies
+    # its pitcher by that number alone, so it is worth carrying through.
+    "pitcher_id": ["PitcherId", "pitcherId", "pitcher_id"],
     # --- advanced scouting: locations, shape detail and plate-appearance
     # context. All optional, so an export lacking them still loads.
     "plate_x":   ["PlateLocSide", "plate_x", "PlateSide", "px", "x"],

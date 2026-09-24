@@ -29,6 +29,38 @@ HEADER_H = 74
 NOTES_H = 62.0
 
 
+def full_name(sub, stat=None) -> str:
+    """The best name available for a pitcher, in order of preference.
+
+    TrackMan writes "DeLue, Asher", so the whole name is already in the pitch
+    file and only needs turning around. TruMedia does not: its `pitcher`
+    column is the bare surname, and its `fullName` column holds the team, not
+    the player. The nearest thing its pitch export offers is
+    `pitcherAbbrevName` -- "J. Radel" -- and the real first name turns up only
+    in the season stats export. So a stats file wins when there is one, the
+    abbreviated form comes next, and the surname alone is the last resort.
+    """
+    def clean(v):
+        txt = str(v).strip()
+        return txt if txt and txt.lower() not in ("nan", "none") else ""
+
+    if stat:
+        got = clean(stat.get("full"))
+        if got:
+            return got
+
+    raw = clean(sub["pitcher"].iloc[0]) if len(sub) else ""
+    if "pitcher_full" in getattr(sub, "columns", []):
+        vals = sub["pitcher_full"].dropna()
+        for v in vals.head(1):
+            got = clean(v)
+            # Only an improvement if it carries something the surname does
+            # not; some exports repeat the surname here.
+            if got and got.lower() != raw.lower():
+                return got
+    return split_name(raw)
+
+
 # ------------------------------------------------------------------ blocks
 def _header(c, name, throws, profile, logo, sub=""):
     c.setFillColor(MAROON)
@@ -340,7 +372,8 @@ def build_individual_1page(df, stats=None, logo=DEFAULT_LOGO,
     with tempfile.TemporaryDirectory() as tmp:
         for i, name in enumerate(names):
             sub, mets, sp, use = _prep(df, name)
-            _header(c, name, sub["throws"].iloc[0], classify(sub), logo)
+            _header(c, full_name(sub, stats.get(name)),
+                    sub["throws"].iloc[0], classify(sub), logo)
             y = PH - HEADER_H - 12
             y = _season_strip(c, stats.get(name, {}), y) - 12
 
@@ -399,7 +432,8 @@ def build_individual_2page(df, stats=None, logo=DEFAULT_LOGO,
             prof = classify(sub)
 
             # ---- page 1: profile, shape, notes
-            _header(c, name, sub["throws"].iloc[0], prof, logo)
+            label = full_name(sub, stats.get(name))
+            _header(c, label, sub["throws"].iloc[0], prof, logo)
             y = PH - HEADER_H - 14
             y = _season_strip(c, stats.get(name, {}), y, h=36.0) - 16
 
@@ -419,7 +453,7 @@ def build_individual_2page(df, stats=None, logo=DEFAULT_LOGO,
             c.showPage()
 
             # ---- page 2: usage and location
-            _header(c, name, sub["throws"].iloc[0], prof, logo,
+            _header(c, label, sub["throws"].iloc[0], prof, logo,
                     sub="Usage and location")
             y = PH - HEADER_H - 18
 
@@ -600,7 +634,8 @@ def _staff_card(c, x, y, w, h, name, sub, stat, tmp, tag):
     c.setFillColor(txt)
     c.setFont("Helvetica-Bold", 5.5)
     c.drawCentredString(x + w / 2, y + h - nb + 2.3,
-                        f"{split_name(name)} - {hand(sub['throws'].iloc[0])}")
+                        f"{full_name(sub, stat)} - "
+                        f"{hand(sub['throws'].iloc[0])}")
 
     top = y + h - nb
     c.setFillColor(HexColor("#4a4a4a"))
