@@ -85,6 +85,57 @@ def first_initial(value) -> str:
     return parts[0][:1].lower() if len(parts) > 1 else ""
 
 
+def name_from_source(source: str) -> str:
+    """Pull a pitcher's name out of a file name.
+
+    A split export names nobody inside the file, but the exports come off
+    TruMedia called things like "M. Bradshaw - Scouting Sheet 2.csv", so the
+    name is right there. Used only when the file itself has no name column,
+    and only as a last resort behind the player id.
+    """
+    stem = re.sub(r"\.[A-Za-z0-9]+$", "", str(source or "").strip())
+    stem = stem.replace("_", " ").split("/")[-1]
+    head = re.split(r"\s+-\s+", stem)[0].strip()
+    # Drop a leading upload hash such as "1b351a71-M. Bradshaw", which some
+    # upload paths prepend.
+    head = re.sub(r"^[0-9a-f]{6,}[-\s]+", "", head, flags=re.I).strip()
+    return head if re.search(r"[A-Za-z]{2,}", head) else ""
+
+
+def load_many_stats(files) -> tuple:
+    """files: iterable of (name, file-like). Returns one frame plus notes.
+
+    Several files are allowed in the stats slot because the split exports
+    come one per pitcher: scouting a staff means uploading a handful of them.
+    A file that will not parse is reported and skipped rather than stopping
+    the others.
+    """
+    frames, notes = [], []
+    for name, fh in files:
+        try:
+            one = load_stats(pd.read_csv(fh, low_memory=False), name)
+        except (SchemaError, ValueError) as e:
+            notes.append(f"Skipped {name}: {e}")
+            continue
+        frames.append(one)
+        notes.append(f"{name}: {len(one)} pitcher"
+                     f"{'s' if len(one) != 1 else ''}")
+    if not frames:
+        raise SchemaError("No usable season stats in the uploaded file(s).")
+
+    out = pd.concat(frames, ignore_index=True, sort=False)
+    # The same man in two files -- a roster export and his own split file --
+    # keeps whichever came first, so the order they are uploaded decides.
+    before = len(out)
+    subset = [c for c in ("player_id", "_key") if c in out.columns]
+    if subset:
+        out = out.drop_duplicates(subset=subset[:1], keep="first")
+    if len(out) < before:
+        notes.append(f"Dropped {before - len(out)} duplicate pitcher row(s) "
+                     f"across files.")
+    return out.reset_index(drop=True), notes
+
+
 def load_stats(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
     lookup = {_key(c): c for c in df.columns}
     mapping = {}
@@ -114,7 +165,10 @@ def load_stats(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
     # a catcher with 36 innings pitched is still a pitcher on this sheet --
     # and attach() only ever looks up names that threw pitches anyway.
     if "last" not in out:
-        out["last"] = ""
+        # Nothing in the file names the pitcher, so fall back to the file
+        # name itself. This is what lets a stack of per-pitcher split exports
+        # be told apart when their ids do not match the pitch file's.
+        out["last"] = name_from_source(source)
     out["_key"] = out["last"].map(name_key)
     out["_init"] = (out["first"].astype(str).str[:1].str.lower()
                     if "first" in out else "")
