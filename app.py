@@ -185,7 +185,8 @@ def roster_label(df: pd.DataFrame, season: dict):
     def fmt(name):
         g = df[df["pitcher"] == name]
         hand = reports.hand(g["throws"].iloc[0]) if len(g) else ""
-        head = reports.split_name(name) + (f" - {hand}" if hand else "")
+        head = scout.full_name(g, season.get(name)) + (f" - {hand}"
+                                                       if hand else "")
         ip = (season.get(name) or {}).get("ip")
         ip_txt = "" if ip is None or str(ip).strip().lower() in ("", "nan") \
             else f"{str(ip).strip()} IP, "
