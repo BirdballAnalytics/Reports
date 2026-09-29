@@ -372,9 +372,68 @@ def _first(sub: pd.DataFrame, col: str):
     return vals.iloc[0] if len(vals) else None
 
 
+def date_span(sub: pd.DataFrame) -> str:
+    """The dates the data covers, as one day or a range.
+
+    A weekly report spans several games, so a single date would be wrong on
+    most of them. The range is written the short way when both ends share a
+    month or a year: "September 16 - 20, 2026".
+    """
+    if "date" not in sub.columns:
+        return ""
+    days = pd.to_datetime(sub["date"], errors="coerce").dropna()
+    if days.empty:
+        return ""
+    lo, hi = days.min(), days.max()
+    if lo.date() == hi.date():
+        return lo.strftime("%B %-d, %Y")
+    if (lo.year, lo.month) == (hi.year, hi.month):
+        return f"{lo.strftime('%B %-d')} \u2013 {hi.strftime('%-d, %Y')}"
+    if lo.year == hi.year:
+        return (f"{lo.strftime('%B %-d')} \u2013 "
+                f"{hi.strftime('%B %-d, %Y')}")
+    return f"{lo.strftime('%b %-d, %Y')} \u2013 {hi.strftime('%b %-d, %Y')}"
+
+
+def opponents(sub: pd.DataFrame) -> list:
+    """Every team whose pitchers this hitter faced, most-seen first."""
+    if "pitcher_team" not in sub.columns:
+        for a, b in (("away_team", "home_team"),):
+            if a in sub.columns and b in sub.columns:
+                bat = _first(sub, "batter_team")
+                names = []
+                for _, row in sub[[a, b]].dropna().drop_duplicates().iterrows():
+                    other = row[a] if str(row[b]) == str(bat) else row[b]
+                    if other and str(other) not in names:
+                        names.append(str(other))
+                return names
+        return []
+    vals = sub["pitcher_team"].dropna().astype(str)
+    return list(vals.value_counts().index)
+
+
+def opponent_label(sub: pd.DataFrame, cap: int = 4) -> str:
+    """Opponents as one line, trimmed when a week runs long."""
+    names = opponents(sub)
+    if not names:
+        return ""
+    if len(names) > cap:
+        return ", ".join(names[:cap]) + f" +{len(names) - cap}"
+    return ", ".join(names)
+
+
 def matchup_label(sub: pd.DataFrame) -> str:
-    away, home = _first(sub, "away_team"), _first(sub, "home_team")
-    when = _first(sub, "date")
-    vs = f"{away} at {home}" if away and home else ""
-    day = when.strftime("%B %-d, %Y") if when is not None else ""
-    return " \u2014 ".join([p for p in (vs, day) if p])
+    """Who was faced and when -- the line along the top right of the report.
+
+    A single game still reads "AWAY at HOME"; anything wider lists the
+    opponents, because "at" stops meaning anything once the data spans more
+    than one ballpark.
+    """
+    who = opponent_label(sub)
+    if len(opponents(sub)) <= 1:
+        away, home = _first(sub, "away_team"), _first(sub, "home_team")
+        days = (pd.to_datetime(sub["date"], errors="coerce").dropna()
+                if "date" in sub.columns else pd.Series(dtype="datetime64[ns]"))
+        if away and home and (days.empty or days.dt.date.nunique() <= 1):
+            who = f"{away} at {home}"
+    return " \u2014 ".join([p for p in (who, date_span(sub)) if p])

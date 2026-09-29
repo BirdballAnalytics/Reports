@@ -232,7 +232,58 @@ def pa_table(s: dict) -> list:
     return rows
 
 
+# A barrel is the exit-velocity / launch-angle combination that historically
+# produces at least a .500 average and 1.500 slugging. The window opens at
+# 98 mph and 26-30 degrees and widens with every extra mile an hour, out to
+# 8-50 degrees at 116.
+#
+# It does not widen evenly: the top of the window climbs 1, then 2, then 2
+# degrees over the first few miles an hour before settling into a steady
+# degree per mph, while the bottom falls a degree per mph throughout. A
+# single straight line between the two ends is a degree or two tight through
+# the middle, so the published steps are anchored here and interpolated
+# between.
+BARREL_EV = 98.0
+BARREL_TOP_EV = 116.0
+BARREL_ANCHORS = [(98.0, 26.0, 30.0), (99.0, 25.0, 31.0),
+                  (100.0, 24.0, 33.0), (101.0, 23.0, 35.0),
+                  (116.0, 8.0, 50.0)]
+
+
+def barrel_window(ev: float) -> tuple:
+    """(low, high) launch angle that counts as barrelled at this speed."""
+    ev = min(max(ev, BARREL_EV), BARREL_TOP_EV)
+    for (e0, l0, h0), (e1, l1, h1) in zip(BARREL_ANCHORS, BARREL_ANCHORS[1:]):
+        if e0 <= ev <= e1:
+            t = (ev - e0) / (e1 - e0)
+            return l0 + t * (l1 - l0), h0 + t * (h1 - h0)
+    return BARREL_ANCHORS[-1][1], BARREL_ANCHORS[-1][2]
+
+
+def is_barrel(ev, la) -> bool:
+    if ev is None or la is None or pd.isna(ev) or pd.isna(la):
+        return False
+    if ev < BARREL_EV:
+        return False
+    lo, hi = barrel_window(ev)
+    return lo <= la <= hi
+
+
+def _rate(num, den, digits=3):
+    """Batting-style rate, printed without the leading zero."""
+    if not den:
+        return "\u2014"
+    return f"{num / den:.{digits}f}".lstrip("0") or ".000"
+
+
 def group_table(s: dict) -> list:
+    """Per pitch-group line: how he handled it, and what came of it.
+
+    The rate stats are charged to the group of the pitch that *ended* the
+    plate appearance, which is the usual convention for a "vs fastballs"
+    split: the count may have been set up by something else, but the
+    at-bat was decided by that pitch.
+    """
     d = s["_d"].copy()
     d["_grp"] = d["pitch_type"].map(pitch_group)
     call = d["pitch_call"].astype(str).str.lower().str.replace(" ", "")
@@ -243,6 +294,12 @@ def group_table(s: dict) -> list:
                 d["plate_z"].between(ZONE["lo"], ZONE["hi"]))
     d["_loc"] = d["plate_x"].notna() & d["plate_z"].notna()
 
+    ends = d.groupby("pa_id").tail(1).copy()
+    ends["_res"] = ends["play_result"].astype(str).str.lower()
+    ends["_kbb"] = ends["kor_bb"].astype(str).str.lower()
+    ends["_call"] = (ends["pitch_call"].astype(str).str.lower()
+                     .str.replace(" ", ""))
+
     rows = []
     for g in GROUP_ORDER + ["Other"]:
         sub = d[d["_grp"] == g]
@@ -251,6 +308,25 @@ def group_table(s: dict) -> list:
         oz = sub[sub["_loc"] & ~sub["_iz"]]
         bip = sub[sub["_ip"]]
         ev = bip["exit_speed"].dropna()
+        barrels = sum(is_barrel(r.get("exit_speed"), r.get("angle"))
+                      for _, r in bip.iterrows())
+
+        e = ends[ends["_grp"] == g]
+        single = int((e["_res"] == "single").sum())
+        dbl = int((e["_res"] == "double").sum())
+        tpl = int((e["_res"] == "triple").sum())
+        hr = int((e["_res"] == "homerun").sum())
+        h = single + dbl + tpl + hr
+        bb = int((e["_kbb"] == "walk").sum())
+        hbp = int((e["_call"] == "hitbypitch").sum())
+        sac = int(e["_res"].isin({"sacrifice", "sacrificebunt",
+                                  "sacrificefly"}).sum())
+        ab = len(e) - bb - hbp - sac
+        tb = single + 2 * dbl + 3 * tpl + 4 * hr
+        on = ab + bb + hbp + sac
+        ops = ("\u2014" if not (ab and on) else
+               f"{(h + bb + hbp) / on + tb / ab:.3f}".lstrip("0"))
+
         rows.append([
             g, str(len(sub)),
             pct(sub["_sw"].sum(), len(sub)),
@@ -259,8 +335,15 @@ def group_table(s: dict) -> list:
             str(len(bip)),
             f"{ev.mean():.1f}" if len(ev) else "\u2014",
             pct((ev >= HARD_HIT).sum(), len(ev)) if len(ev) else "\u2014",
+            pct(barrels, len(bip)) if len(bip) else "\u2014",
+            str(h), str(dbl + tpl + hr),
+            _rate(h, ab), _rate(tb, ab), ops,
         ])
     return rows
+
+
+GROUP_HEADS = ["Pitch", "#", "Swing%", "Chase%", "Whiff%", "BIP", "EV",
+               "HH%", "Brl%", "H", "XBH", "AVG", "SLG", "OPS"]
 
 
 # ----------------------------------------------------------------- charts
@@ -598,6 +681,12 @@ def _hitting_page(c, df, batter, matchup, team, source, tmp, idx,
                   fence=None):
     sub = df[df["batter"] == batter].copy()
     s = summarize(sub)
+    # Work the header out from this hitter's own rows. A file that holds both
+    # clubs' hitters would otherwise put every team in the file above every
+    # batter, including the one he plays for.
+    from .schema import matchup_label
+    own = matchup_label(sub)
+    matchup = own or matchup
     if True:
         spray_p = os.path.join(tmp, f"spray{idx}.png")
         zone_p = os.path.join(tmp, f"zone{idx}.png")
@@ -639,26 +728,16 @@ def _hitting_page(c, df, batter, matchup, team, source, tmp, idx,
                     height=hgt, mask="auto")
         _draw_discipline(c, s, rx, 404, colw)
 
-        # row 3 : plate appearances + pitch groups
-        _title(c, "Plate appearances", lx, 209)
-        _title(c, "By pitch group", rx, 209)
-        pa_rows = pa_table(s)
+        # row 3 : pitch groups, full width.
+        # The plate-appearance log moved to the top of the feedback page,
+        # which freed this whole band -- enough for the rate stats to sit
+        # beside the swing-decision ones instead of being squeezed out.
+        full_w = PW - 2 * MARGIN
+        _title(c, "By pitch group", lx, 209)
         gp_rows = group_table(s)
-        pa_w = [22, 62, 20, 16, 48, 30, 26, 29]
-        gp_w = [46, 18, 38, 38, 36, 22, 28, 27]
-        avail = 196 - 50
-        min_rh = 10.5                      # below this the text stops fitting
-        max_pa = max(int((avail - 22) // min_rh), 1)
-        if len(pa_rows) > max_pa:
-            extra = len(pa_rows) - (max_pa - 1)
-            pa_rows = pa_rows[:max_pa - 1] + [
-                [f"+{extra} more", "", "", "", "", "", "", ""]]
-        pa_rh = min(19.0, (avail - 22) / max(len(pa_rows), 1))
-        gp_rh = min(32.0, (avail - 22) / max(len(gp_rows), 1))
-        _draw_table(c, ["Inn", "Pitcher", "Thr", "P", "Result", "EV", "LA",
-                        "Dist"], pa_rows, pa_w, lx, 196,
-                    align_first_left=False, rh=pa_rh, hh=22)
-        _draw_table(c, ["Pitch", "#", "Swing%", "Chase%", "Whiff%", "BIP",
-                        "EV", "HH%"], gp_rows, gp_w, rx, 196, rh=gp_rh, hh=22)
+        gp_w = [64, 26, 44, 44, 42, 28, 34, 36, 36, 24, 30, 40, 40, 44]
+        gp_w = [w * full_w / sum(gp_w) for w in gp_w]
+        gp_rh = min(30.0, (196 - 50 - 22) / max(len(gp_rows), 1))
+        _draw_table(c, GROUP_HEADS, gp_rows, gp_w, lx, 196, rh=gp_rh, hh=22)
 
         _draw_footer(c, team, source)

@@ -103,10 +103,67 @@ def opponent_of(sub: pd.DataFrame) -> str:
     return ""
 
 
+def form_safe(text) -> str:
+    """Make a string safe to put inside an AcroForm field.
+
+    ReportLab escapes form values against a Latin-1 table and raises a bare
+    KeyError on anything outside it -- an en dash in a date range is enough
+    to do it. Drawn text has no such problem, so this applies only to field
+    values: typographic punctuation is folded to ASCII and anything still
+    unmappable is dropped rather than bringing the build down.
+    """
+    s = str(text or "")
+    for bad, good in (("–", "-"), ("—", "-"), ("−", "-"),
+                      ("‘", "'"), ("’", "'"), ("“", '"'),
+                      ("”", '"'), ("…", "..."), ("·", "-")):
+        s = s.replace(bad, good)
+    return s.encode("latin-1", "ignore").decode("latin-1")
+
+
 def _field_box(c, x, y, w, h):
     c.setStrokeColor(FIELD_BORDER)
     c.setLineWidth(0.7)
     c.rect(x, y, w, h, stroke=1, fill=0)
+
+
+def _pa_block(c, sub, x, top, w):
+    """The plate-appearance log, at the top of the feedback page.
+
+    It sits here rather than on the chart page because it is the thing a
+    coach reads alongside the hitter while filling the form in, and because
+    at full width nothing has to be truncated -- the old half-width version
+    collapsed everything past the eighth at-bat into a "+3 more" row.
+    """
+    from . import hitting
+
+    rows = hitting.pa_table(hitting.summarize(sub)) if len(sub) else []
+    c.setFillColor(MAROON)
+    c.setFont("Helvetica-Bold", 9.5)
+    c.drawString(x, top, "PLATE APPEARANCES")
+    y = top - 6
+    if not rows:
+        c.setFillColor(SOFT)
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(x, y - 12, "No plate appearances in this range.")
+        return y - 20
+    weights = [26, 78, 24, 20, 62, 34, 30, 34]
+    widths = [wt * w / sum(weights) for wt in weights]
+    # Whatever is left once the feedback box and the development plan have
+    # been kept back. A fortnight of at-bats will not fit at a readable row
+    # height, so past that the tail collapses into one line rather than
+    # running off the bottom of the page.
+    min_rh, floor = 10.5, MARGIN + 270.0
+    room = max(top - 6 - 19 - floor, min_rh)
+    max_rows = max(int(room // min_rh), 1)
+    if len(rows) > max_rows:
+        extra = len(rows) - (max_rows - 1)
+        rows = rows[:max_rows - 1] + [[f"+{extra} more", "", "", "", "",
+                                       "", "", ""]]
+    rh = min(15.0, max(min_rh, room / max(len(rows), 1)))
+    hitting._draw_table(
+        c, ["Inn", "Pitcher", "Thr", "P", "Result", "EV", "LA", "Dist"],
+        rows, widths, x, y, align_first_left=False, rh=rh, hh=19)
+    return y - 19 - rh * len(rows)
 
 
 def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
@@ -128,7 +185,7 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
            stroke=0, fill=1)
     c.setFillColor(white)
     c.setFont("Helvetica-Bold", 19)
-    c.drawString(MARGIN + 14, top - 25, "POST SERIES HITTER FEEDBACK")
+    c.drawString(MARGIN + 14, top - 25, "WEEKLY HITTER FEEDBACK")
     c.setFillColor(GOLD)
     c.setFont("Helvetica-Bold", 8.2)
     c.drawString(MARGIN + 14, top - 37, team.upper())
@@ -136,13 +193,12 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
     y = top - bar_h - gold_h - 20
 
     # ---- player / date / opponent (pre-filled, still editable) -------
-    when = ""
-    if "date" in sub.columns:
-        d = sub["date"].dropna()
-        if len(d):
-            when = pd.Timestamp(d.iloc[0]).strftime("%m/%d/%Y")
-    prefill = [("PLAYER", batter, 3.0), ("DATE", when, 1.4),
-               ("OPPONENT", opponent_of(sub), 2.2)]
+    # The date field carries the whole span the report covers, and the
+    # opponent field every team faced in it -- a week is rarely one of each.
+    from .schema import date_span, opponent_label
+    when = date_span(sub)
+    prefill = [("PLAYER", batter, 3.0), ("DATES", when, 2.0),
+               ("OPPONENTS", opponent_label(sub) or opponent_of(sub), 2.4)]
     gap, pad = 16.0, 8.0
     labels_w = sum(c.stringWidth(l, "Helvetica-Bold", 8) + pad
                    for l, _, _ in prefill)
@@ -155,7 +211,7 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
         c.drawString(x, y - 10, label)
         fx = x + c.stringWidth(label, "Helvetica-Bold", 8) + pad
         fw = free * weight / share
-        form.textfield(name=f"{tag}_{label.lower()}", value=value,
+        form.textfield(name=f"{tag}_{label.lower()}", value=form_safe(value),
                        x=fx, y=y - 15, width=fw, height=17,
                        borderColor=FIELD_BORDER, fillColor=white,
                        textColor=INK, borderWidth=0.7, fontSize=8.5,
@@ -163,93 +219,30 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
         x = fx + fw + gap
     y -= 26
 
-    # ---- legend -----------------------------------------------------
-    x = MARGIN
-    for label, col in LEGEND:
-        c.setFillColor(HexColor(col))
-        c.rect(x, y - 9, 10, 9, stroke=0, fill=1)
-        c.setFillColor(SOFT)
-        c.setFont("Helvetica", 7.2)
-        c.drawString(x + 14, y - 7, label)
-        x += 14 + c.stringWidth(label, "Helvetica", 7.2) + 22
-    y -= 18
-
-    # ---- table ------------------------------------------------------
-    cols = [W_AREA, W_ASSESS, W_FEED]
-    tw = sum(cols)
-    hh = 20.0
-    c.setFillColor(MAROON)
-    c.rect(MARGIN, y - hh, tw, hh, stroke=0, fill=1)
-    c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 8.4)
-    for cx, head in zip(
-            [MARGIN + 8, MARGIN + cols[0] + 8, MARGIN + cols[0] + cols[1] + 8],
-            ["AREA TO REVIEW", "ASSESSMENT", "HITTERS FEEDBACK"]):
-        c.drawString(cx, y - hh + 6.5, head)
-    y -= hh
-
-    def area_cell(title, desc, ry, rh, shade):
-        if shade:
-            c.setFillColor(TINT)
-            c.rect(MARGIN, ry, tw, rh, stroke=0, fill=1)
-        c.setStrokeColor(RULE)
-        c.setLineWidth(0.5)
-        c.rect(MARGIN, ry, tw, rh, stroke=1, fill=0)
-        c.line(MARGIN + cols[0], ry, MARGIN + cols[0], ry + rh)
-        c.setFillColor(MAROON)
-        c.setFont("Helvetica-Bold", 8.2)
-        c.drawString(MARGIN + 8, ry + rh - 12, title)
-        c.setFillColor(HexColor("#3d3d3d"))
-        c.setFont("Helvetica", 7.6)
-        ty = ry + rh - 23
-        for line in wrap(c, desc, cols[0] - 16):
-            c.drawString(MARGIN + 8, ty, line)
-            ty -= 8.6
-
-    for i, (title, desc) in enumerate(ROWS):
-        lines = len(wrap(c, desc, cols[0] - 16))
-        rh = 11 + lines * 8.6 + 11
-        y -= rh
-        area_cell(title, desc, y, rh, i % 2 == 0)
-        # assessment dropdown, vertically centred
-        form.choice(name=f"{tag}_assess_{i}", value="Select", options=CHOICES,
-                    x=MARGIN + cols[0] + 8, y=y + rh / 2 - 8,
-                    width=cols[1] - 16, height=16,
-                    borderColor=FIELD_BORDER, fillColor=white, textColor=INK,
-                    borderWidth=0.7, fontSize=8, fontName="Helvetica",
-                    forceBorder=True)
-        fx = MARGIN + cols[0] + cols[1] + 8
-        form.textfield(name=f"{tag}_feed_{i}", value="",
-                       x=fx, y=y + 6, width=cols[2] - 16, height=rh - 12,
-                       borderColor=FIELD_BORDER, fillColor=white,
-                       textColor=INK, borderWidth=0.7, fontSize=8,
-                       fontName="Helvetica", forceBorder=True,
-                       fieldFlags="multiline")
-
-    # OVERALL spans assessment + feedback
-    title, desc = OVERALL
-    lines = len(wrap(c, desc, cols[0] - 16))
-    rh = 11 + lines * 8.6 + 20
-    y -= rh
-    area_cell(title, desc, y, rh, len(ROWS) % 2 == 0)
-    form.textfield(name=f"{tag}_overall", value="",
-                   x=MARGIN + cols[0] + 8, y=y + 6,
-                   width=cols[1] + cols[2] - 16, height=rh - 12,
-                   borderColor=FIELD_BORDER, fillColor=white, textColor=INK,
-                   borderWidth=0.7, fontSize=8, fontName="Helvetica",
-                   forceBorder=True, fieldFlags="multiline")
-    # ---- additional comments ---------------------------------------
-    y -= 22
-    c.setFillColor(MAROON)
-    c.setFont("Helvetica-Bold", 9.5)
-    c.drawString(MARGIN, y, "ADDITIONAL COMMENTS")
     y -= 6
-    form.textfield(name=f"{tag}_comments", value="", x=MARGIN, y=y - 34,
-                   width=tw, height=34, borderColor=FIELD_BORDER,
+
+    # ---- plate appearances ------------------------------------------
+    # The ten-row self-assessment table and its colour legend used to live
+    # here. They came out at the coaches' request; what the page is for now
+    # is the log, one block of coach feedback and the plan that follows.
+    y = _pa_block(c, sub, MARGIN, y, PW - 2 * MARGIN)
+
+    # ---- coach feedback ---------------------------------------------
+    tw = PW - 2 * MARGIN
+    y -= 26
+    c.setFillColor(MAROON)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(MARGIN, y, "COACH FEEDBACK")
+    y -= 6
+    # Given the room the stripped page leaves, this is now the main writing
+    # space rather than an afterthought under a table.
+    box_h = max(90.0, y - MARGIN - 150.0)
+    form.textfield(name=f"{tag}_comments", value="", x=MARGIN, y=y - box_h,
+                   width=tw, height=box_h, borderColor=FIELD_BORDER,
                    fillColor=white, textColor=INK, borderWidth=0.7,
-                   fontSize=8, fontName="Helvetica", forceBorder=True,
+                   fontSize=9, fontName="Helvetica", forceBorder=True,
                    fieldFlags="multiline")
-    y -= 34
+    y -= box_h
 
     # ---- development plan ------------------------------------------
     y -= 22
