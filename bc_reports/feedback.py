@@ -24,6 +24,13 @@ TINT = HexColor("#f6f2e9")
 BAND = HexColor("#efe9dc")
 FIELD_BORDER = HexColor("#c9b98f")
 
+# ReportLab defaults every text field to maxlen=100, which writes /MaxLen 100
+# into the PDF. Viewers then show a character counter beside the box and stop
+# accepting input at a hundred characters -- about two sentences, in a field
+# meant to hold a week's worth of feedback. Passing a falsy value makes
+# ReportLab omit /MaxLen altogether, which is what an open-ended box needs.
+NO_LIMIT = 0
+
 LEGEND = [("Yes*", "#7bc47f"), ("Partially", "#f2d06b"), ("No*", "#e8797f"),
           ("Unsure", "#8fb8dd"), ("No opportunity", "#c9c9c9")]
 CHOICES = ["Select", "Yes*", "Partially", "No*", "Unsure", "No opportunity"]
@@ -215,7 +222,8 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
                        x=fx, y=y - 15, width=fw, height=17,
                        borderColor=FIELD_BORDER, fillColor=white,
                        textColor=INK, borderWidth=0.7, fontSize=8.5,
-                       fontName="Helvetica", forceBorder=True)
+                       fontName="Helvetica", forceBorder=True,
+                       maxlen=NO_LIMIT)
         x = fx + fw + gap
     y -= 26
 
@@ -241,7 +249,7 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
                    width=tw, height=box_h, borderColor=FIELD_BORDER,
                    fillColor=white, textColor=INK, borderWidth=0.7,
                    fontSize=9, fontName="Helvetica", forceBorder=True,
-                   fieldFlags="multiline")
+                   fieldFlags="multiline", maxlen=NO_LIMIT)
     y -= box_h
 
     # ---- development plan ------------------------------------------
@@ -260,5 +268,6 @@ def draw_feedback_page(c, batter: str, sub: pd.DataFrame, idx: int,
                        x=MARGIN + label_w, y=y, width=tw - label_w, height=19,
                        borderColor=FIELD_BORDER, fillColor=white,
                        textColor=INK, borderWidth=0.7, fontSize=8.5,
-                       fontName="Helvetica", forceBorder=True)
+                       fontName="Helvetica", forceBorder=True,
+                       maxlen=NO_LIMIT)
     return y
