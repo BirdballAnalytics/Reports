@@ -7,6 +7,7 @@ Two modes, chosen on entry:
 from __future__ import annotations
 
 import os
+import re
 from datetime import date
 
 import pandas as pd
@@ -467,6 +468,32 @@ def scouting_page():
 
 
 # ---------------------------------------------------------------- hitting
+def surname(name: str) -> str:
+    """Just the last name, however the export writes it.
+
+    TrackMan gives "Mainolfi, Ty" and other exports "Ty Mainolfi"; both have
+    to land on "Mainolfi". Anything that is not a letter or a digit comes out
+    so the result is safe to hand a file system -- "Van Ameyde" becomes
+    "VanAmeyde", "O'Brien" becomes "OBrien".
+    """
+    raw = str(name or "").strip()
+    last = raw.split(",")[0] if "," in raw else raw.split(" ")[-1]
+    return re.sub(r"[^A-Za-z0-9]+", "", last)
+
+
+def hitting_filename(picked: list) -> str:
+    """Surname and today's date for one hitter; a plain stamp for several.
+
+    Dated by the day it is downloaded rather than the day of the games,
+    because a weekly report spans several dates and these get filed by when
+    the coach pulled them.
+    """
+    stamp = date.today().isoformat()
+    if len(picked) == 1:
+        return f"{surname(picked[0]) or 'Hitter'}-{stamp}.pdf"
+    return f"Hitting-{len(picked)}-hitters-{stamp}.pdf"
+
+
 def hitting_page():
     bar("Hitting", "Hitter game reports")
     with st.sidebar:
@@ -544,11 +571,12 @@ def hitting_page():
             st.session_state["hit_pdf"] = hitting.build_hitting_pdf(
                 d, picked, matchup, team, srcs, fence, with_fb)
     if "hit_pdf" in st.session_state:
-        stamp = game if game != "All games" else date.today().isoformat()
+        name = hitting_filename(picked)
         st.download_button("Download hitting report",
                            st.session_state["hit_pdf"],
-                           file_name=f"{stamp}-Hitting.pdf",
+                           file_name=name,
                            mime="application/pdf")
+        st.caption(f"Saves as **{name}**")
 
 
 # ------------------------------------------------------------------- main
