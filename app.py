@@ -482,10 +482,12 @@ def hitting_page():
             "center": f3.number_input("Center", value=403, step=1),
         }
         st.header("Feedback form")
-        with_fb = st.checkbox("Include post-series feedback page", value=True,
-                              help="Adds a fillable form behind each hitter's "
-                                   "report, pre-filled with player, date and "
-                                   "opponent.")
+        with_fb = st.checkbox("Include weekly feedback page", value=True,
+                              help="Adds a fillable page behind each hitter's "
+                                   "report: his plate-appearance log, a "
+                                   "coach feedback box and the development "
+                                   "plan, pre-filled with player, dates and "
+                                   "opponents.")
         st.header("Footer")
         team = st.text_input("Left", "Boston College Baseball")
         srcs = st.text_input("Right", "Source: TrackMan")
