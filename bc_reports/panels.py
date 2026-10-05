@@ -140,17 +140,40 @@ def damage_map(sub, path, title="", size=1.30, dpi=340):
     plt.close(fig)
 
 
-def usage_bars(use_df, path, width=3.0, height=1.05, dpi=340):
-    """Horizontal stacked shares, one row per situation."""
-    fig, ax = plt.subplots(figsize=(width, height), dpi=dpi)
-    # drawn top-down in the order given, so the caller controls the order
-    rows = list(use_df.index)
+RHH_RED = "#c8102e"
+LHH_BLUE = "#005daa"
+
+
+def usage_bars(use_df, path, width=3.0, height=1.05, dpi=340, sections=None):
+    """Horizontal stacked shares, one row per situation.
+
+    `sections` groups the rows under headings: a list of
+    (heading, colour, [row keys]). Each heading gets a line of its own with
+    no bar on it, so the two batter hands read as separate blocks rather
+    than six rows the eye has to sort out. Without it the frame is drawn
+    flat, in index order, as it always was.
+    """
     groups = [g for g in ("FB", "BB", "CH", "CUT") if g in use_df.columns]
 
-    for i, situ in enumerate(rows):
+    # (row key or None, display label, colour, bold) top to bottom
+    plan = []
+    if sections:
+        for head, tone, keys in sections:
+            plan.append((None, head, tone, True))
+            for k in keys:
+                if k in use_df.index:
+                    label = k.split(" ", 1)[1] if " " in k else k
+                    plan.append((k, "   " + label, INK, False))
+    else:
+        plan = [(k, k, INK, False) for k in use_df.index]
+
+    fig, ax = plt.subplots(figsize=(width, height), dpi=dpi)
+    for i, (key, _, _, _) in enumerate(plan):
+        if key is None:
+            continue
         left = 0.0
         for g in groups:
-            v = use_df.loc[situ, g]
+            v = use_df.loc[key, g]
             if not np.isfinite(v) or v <= 0:
                 continue
             ax.barh(i, v, left=left, height=0.62,
@@ -160,17 +183,30 @@ def usage_bars(use_df, path, width=3.0, height=1.05, dpi=340):
                         ha="center", va="center", fontsize=5.6,
                         color="white", fontweight="bold")
             left += v
+        if left <= 0:                           # nothing thrown in this slice
+            ax.text(0.0, i, "no pitches", ha="left", va="center",
+                    fontsize=5.2, color="#9a9a9a", style="italic")
 
-    ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels(rows, fontsize=6.0, color=INK)
+    ax.set_yticks(range(len(plan)))
+    ax.set_yticklabels([lab for _, lab, _, _ in plan], fontsize=6.0)
+    for tick, (_, _, tone, bold) in zip(ax.get_yticklabels(), plan):
+        tick.set_color(tone)
+        if bold:
+            tick.set_fontweight("bold")
     ax.set_xlim(0, 1)
+    ax.set_ylim(len(plan) - 0.5, -0.5)
     ax.set_xticks([])
-    ax.invert_yaxis()
     for s in ax.spines.values():
         s.set_visible(False)
     ax.tick_params(length=0)
     fig.savefig(path, bbox_inches="tight", pad_inches=0.015, transparent=True)
     plt.close(fig)
+
+
+def hand_sections():
+    """The grouping the individual sheets pass to usage_bars."""
+    return [("vs LHH", LHH_BLUE, ["L Overall", "L 2K", "L RISP"]),
+            ("vs RHH", RHH_RED, ["R Overall", "R 2K", "R RISP"])]
 
 
 def usage_legend_items():

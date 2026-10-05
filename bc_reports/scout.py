@@ -331,14 +331,21 @@ def _notes(c, x, top, bottom, w):
     c.line(x, top - 14, x + w, top - 14)
     step = max(14.0, min(26.0, ((top - 22) - bottom) / 2))
     y = top - 22
+    # Each hand gets two writing spaces on one line: the approach up to two
+    # strikes on the left, the two-strike approach on the right.
+    half = x + 34 + (w - 34) / 2
     for lab, col in (("RHH:", RHH_RED), ("LHH:", LHH_BLUE)):
         y -= step
         c.setFillColor(col)
         c.setFont("Helvetica-Bold", 8.4)
         c.drawString(x + 2, y + 1, lab)
+        # Same colour as the hand it belongs to, so each line reads as one
+        # row rather than two unrelated boxes.
+        c.drawString(half + 6, y + 1, "2K:")
         c.setStrokeColor(IRULE)
         c.setLineWidth(0.5)
-        c.line(x + 34, y, x + w, y)
+        c.line(x + 34, y, half - 4, y)
+        c.line(half + 24, y, x + w, y)
     return y
 
 
@@ -346,7 +353,7 @@ def _notes(c, x, top, bottom, w):
 def _prep(df, name):
     sub = df[df["pitcher"] == name]
     return sub, advanced.metrics_table(sub), advanced.hand_splits(sub), \
-        advanced.usage(sub)
+        advanced.usage_by_hand(sub)
 
 
 def _movement(c, sub, tmp, tag, x, top, size):
@@ -396,7 +403,8 @@ def build_individual_1page(df, stats=None, logo=DEFAULT_LOGO,
             _splits_table(c, sp, MARGIN, y, PW / 2 - MARGIN - 14)
 
             up = os.path.join(tmp, f"{i}_use.png")
-            panels.usage_bars(use, up, width=4.0, height=1.25)
+            panels.usage_bars(use, up, width=4.0, height=1.95,
+                              sections=panels.hand_sections())
             ir = ImageReader(up)
             iw, ih = ir.getSize()
             uw = PW - MARGIN - ux
@@ -460,7 +468,8 @@ def build_individual_2page(df, stats=None, logo=DEFAULT_LOGO,
             _section(c, "USAGE", MARGIN, y)
             y -= 10
             up = os.path.join(tmp, f"{i}_use2.png")
-            panels.usage_bars(use, up, width=4.0, height=1.25)
+            panels.usage_bars(use, up, width=4.0, height=1.95,
+                              sections=panels.hand_sections())
             ir = ImageReader(up)
             iw, ih = ir.getSize()
             uw = 330.0

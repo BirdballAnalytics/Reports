@@ -246,6 +246,41 @@ def usage(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out).T[GROUP_ORDER + ["n"]]
 
 
+# The six slices the individual sheet shows: each batter hand on its own,
+# broken into the whole sample, two strikes, and runners in scoring position.
+# Kept apart from usage() above because the staff card still reads that one's
+# "vs RHH" / "vs LHH" rows and has no room for six.
+HAND_SITUATIONS = ["Overall", "2K", "RISP"]
+
+
+def usage_by_hand(df: pd.DataFrame) -> pd.DataFrame:
+    """Pitch mix per batter hand, split by situation.
+
+    Rows come back keyed "L Overall", "R 2K" and so on, in the order the
+    sheet draws them: every left-handed slice, then every right-handed one.
+    """
+    d = df[df["grp"].notna()]
+    out = {}
+    for hand in ("L", "R"):
+        side = d[d["bat_hand"] == hand] if not d.empty else d
+        cuts = {
+            "Overall": side,
+            "2K": side[side["two_k"]] if len(side) else side,
+            "RISP": (side[side["risp"]] if len(side) and "risp" in side.columns
+                     else side.iloc[0:0]),
+        }
+        for situ, sub in cuts.items():
+            key = f"{hand} {situ}"
+            if sub is None or sub.empty:
+                out[key] = {g: np.nan for g in GROUP_ORDER}
+                out[key]["n"] = 0
+                continue
+            share = sub["grp"].value_counts(normalize=True)
+            out[key] = {g: float(share.get(g, 0.0)) for g in GROUP_ORDER}
+            out[key]["n"] = len(sub)
+    return pd.DataFrame(out).T[GROUP_ORDER + ["n"]]
+
+
 # -------------------------------------------------------------- pitch line
 def metrics_table(df: pd.DataFrame) -> list:
     """Per-pitch-type averages, including the four new columns."""
