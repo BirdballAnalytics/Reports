@@ -1,0 +1,13 @@
+[theme]
+primaryColor = "#8c2232"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f2e9"
+textColor = "#1f1f1f"
+
+[server]
+# Streamlit defaults this to 200 MB. Raised so a full season of TrackMan,
+# or several games at once, goes through in one upload. The real ceiling on
+# a hosted app is memory rather than this number, which is why the loaders
+# read only the columns the reports use.
+maxUploadSize = 2048
+maxMessageSize = 2048
