@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import pandas as pd
 
-from .schema import SchemaError, _key
+from .schema import SchemaError, _key, read_csv_slim
 
 STAT_CANON = {
     "last":  ["player", "lastName", "last_name", "Player", "Last"],
@@ -113,7 +113,8 @@ def load_many_stats(files) -> tuple:
     frames, notes = [], []
     for name, fh in files:
         try:
-            one = load_stats(pd.read_csv(fh, low_memory=False), name)
+            one = load_stats(read_csv_slim(
+                fh, {**STAT_CANON, **STAT_OPTIONAL, **STAT_EXTRA}), name)
         except (SchemaError, ValueError) as e:
             notes.append(f"Skipped {name}: {e}")
             continue

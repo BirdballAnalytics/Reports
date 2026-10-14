@@ -172,16 +172,50 @@ class SchemaError(ValueError):
     pass
 
 
-def detect_columns(df: pd.DataFrame) -> dict:
-    """Map canonical field -> actual column name present in df."""
-    lookup = {_key(c): c for c in df.columns}
+def match_columns(columns, spec: dict) -> dict:
+    """Map canonical field -> actual column name, given a spec of aliases."""
+    lookup = {_key(c): c for c in columns}
     found = {}
-    for field, aliases in {**CANON, **OPTIONAL}.items():
+    for field, aliases in spec.items():
         for alias in aliases:
             if _key(alias) in lookup:
                 found[field] = lookup[_key(alias)]
                 break
     return found
+
+
+def detect_columns(df: pd.DataFrame) -> dict:
+    """Map canonical field -> actual column name present in df."""
+    return match_columns(df.columns, {**CANON, **OPTIONAL})
+
+
+def read_csv_slim(fh, spec: dict | None = None) -> pd.DataFrame:
+    """Read a CSV keeping only the columns we actually map.
+
+    A TrackMan export carries about two hundred columns and we use
+    twenty-six of them; the rest are spin-axis vectors and ball-flight
+    coefficients. Reading the header first and then re-reading with
+    `usecols` cuts memory by roughly two thirds and load time by three
+    quarters, which is what decides whether a large file goes through at
+    all -- the hosting memory ceiling bites long before the upload limit
+    does.
+
+    Falls back to a plain read if anything about the two-pass approach does
+    not hold, so an unfamiliar export can never be made worse by it.
+    """
+    spec = spec or {**CANON, **OPTIONAL}
+    try:
+        head = pd.read_csv(fh, nrows=0)
+        keep = sorted(set(match_columns(head.columns, spec).values()))
+        if not keep:
+            raise ValueError("no recognised columns")
+        if hasattr(fh, "seek"):
+            fh.seek(0)
+        return pd.read_csv(fh, low_memory=False, usecols=keep)
+    except Exception:
+        if hasattr(fh, "seek"):
+            fh.seek(0)
+        return pd.read_csv(fh, low_memory=False)
 
 
 def normalize(df: pd.DataFrame, mapping: dict | None = None,
@@ -260,7 +294,7 @@ def load_many(files) -> tuple[pd.DataFrame, pd.DataFrame, list]:
     """files: iterable of (name, file-like). Returns tracked, dropped, notes."""
     frames, notes = [], []
     for name, fh in files:
-        raw = pd.read_csv(fh, low_memory=False)
+        raw = read_csv_slim(fh)
         one = normalize(raw, source=name)
         frames.append(one)
         note = f"{name}: {len(raw)} rows"
@@ -315,14 +349,13 @@ HIT_OPTIONAL = {
 }
 
 
+def read_hitting_csv(fh) -> pd.DataFrame:
+    """read_csv_slim against the hitting alias table."""
+    return read_csv_slim(fh, {**HIT_CANON, **HIT_OPTIONAL})
+
+
 def normalize_hitting(df: pd.DataFrame, source: str = "") -> pd.DataFrame:
-    lookup = {_key(c): c for c in df.columns}
-    mapping = {}
-    for field, aliases in {**HIT_CANON, **HIT_OPTIONAL}.items():
-        for alias in aliases:
-            if _key(alias) in lookup:
-                mapping[field] = lookup[_key(alias)]
-                break
+    mapping = match_columns(df.columns, {**HIT_CANON, **HIT_OPTIONAL})
     missing = [f for f in HIT_CANON if f not in mapping]
     if missing:
         raise SchemaError(
