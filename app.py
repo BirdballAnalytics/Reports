@@ -23,15 +23,21 @@ from bc_reports.retags import DROP, METRICS, OPS, RetagBook, Rule
 # as a redacted AttributeError deep in a callback. Fail loudly and early.
 _REQUIRED = {
     "bc_reports/schema.py": (schema, ["normalize_hitting", "matchup_label",
-                                      "load_many"]),
+                                      "load_many", "read_csv_slim",
+                                      "read_hitting_csv", "match_columns",
+                                      "date_span", "opponent_label"]),
     "bc_reports/hitting.py": (hitting, ["build_hitting_pdf", "fence_radius"]),
     "bc_reports/reports.py": (reports, ["build_staff_pdf", "staff_cuts",
                                         "RHH_RED", "LHH_BLUE"]),
-    "bc_reports/staffstats.py": (staffstats, ["load_stats", "attach"]),
-    "bc_reports/feedback.py": (feedback, ["draw_feedback_page"]),
-    "bc_reports/advanced.py": (advanced, ["add_risp", "hand_splits", "usage"]),
+    "bc_reports/staffstats.py": (staffstats, ["load_stats", "attach",
+                                              "load_many_stats",
+                                              "collapse_splits"]),
+    "bc_reports/feedback.py": (feedback, ["draw_feedback_page", "form_safe"]),
+    "bc_reports/advanced.py": (advanced, ["add_risp", "hand_splits", "usage",
+                                          "usage_by_hand"]),
     "bc_reports/scout.py": (scout, ["build_individual_1page",
-                                    "build_staff_expanded", "ip_value"]),
+                                    "build_staff_expanded", "ip_value",
+                                    "full_name"]),
     "bc_reports/derived.py": (derived, ["season_from_pitches", "coverage"]),
 }
 _STALE = [f"{path} (missing {a})" for path, (mod, attrs) in _REQUIRED.items()
@@ -526,8 +532,9 @@ def hitting_page():
     frames = []
     for f in ups:
         try:
-            frames.append(schema.normalize_hitting(
-                pd.read_csv(f, low_memory=False), f.name))
+            reader = getattr(schema, "read_hitting_csv", None)
+            raw = reader(f) if reader else pd.read_csv(f, low_memory=False)
+            frames.append(schema.normalize_hitting(raw, f.name))
         except schema.SchemaError as e:
             st.error(str(e))
             return

@@ -20,7 +20,15 @@ import pandas as pd
 # box drawn on the panels and the box used to rescale a feet-based export can
 # never drift apart. Re-exported here because panels.py and the sheets have
 # always imported it from this module.
-from .schema import ZONE_X, ZONE_Y  # noqa: F401
+#
+# Taken by attribute rather than `from .schema import ZONE_X` so that a
+# half-finished upload leaving an older schema.py behind degrades to these
+# values instead of raising at import time -- an ImportError here would take
+# the whole app down before app.py can say which file is stale.
+from . import schema
+
+ZONE_X = getattr(schema, "ZONE_X", 1.175)
+ZONE_Y = getattr(schema, "ZONE_Y", 1.125)
 
 # The four groups the staff scouts by. Cutter stands alone rather than
 # folding into the fastballs.

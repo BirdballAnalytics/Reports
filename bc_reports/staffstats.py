@@ -10,7 +10,23 @@ from __future__ import annotations
 import re
 import pandas as pd
 
-from .schema import SchemaError, _key, read_csv_slim
+from . import schema
+from .schema import SchemaError, _key
+
+
+def read_csv_slim(fh, spec=None):
+    """Delegate to schema's column-pruning reader, if this build has it.
+
+    Imported through a wrapper rather than `from .schema import read_csv_slim`
+    on purpose: a half-finished upload that leaves an older schema.py behind
+    would make that import raise at start-up, and an ImportError kills the
+    app before the stale-file check in app.py can explain what happened.
+    This way a mismatched pair still runs, just without the memory saving.
+    """
+    fn = getattr(schema, "read_csv_slim", None)
+    if fn is None:
+        return pd.read_csv(fh, low_memory=False)
+    return fn(fh, spec)
 
 STAT_CANON = {
     "last":  ["player", "lastName", "last_name", "Player", "Last"],
